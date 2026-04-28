@@ -12,7 +12,7 @@
 <aside class="sidebar">
 	<a href={resolve('/')} class="brand">
 		<img class="logo" src={logo} alt="Cornea logo" />
-		<span>C O R N E A</span>
+		<span>CORNEA</span>
 	</a>
 
 	<nav class="nav-links">
@@ -52,11 +52,11 @@
 	.sidebar {
 		border-top-right-radius: 2rem;
 		border-bottom-right-radius: 2rem;
-		width: 250px;
+		width: 230px;
 		min-height: 100vh;
 		padding: 2rem 1.5rem;
-		background: var(--theme-text);
-		color: var(--theme-paper);
+		background: var(--theme-accent);
+		color: #ffffff;
 		border-right: 4px solid var(--theme-line);
 		display: flex;
 		flex-direction: column;
@@ -71,8 +71,9 @@
 		gap: 0.75rem;
 		font-family: 'Akira', sans-serif;
 		font-size: 1rem;
+		letter-spacing: 0.2em;
 		text-decoration: none;
-		color: var(--theme-paper);
+		color: #ffffff;
 		padding-bottom: 1rem;
 	}
 
@@ -106,6 +107,7 @@
 		width: 1.5rem;
 		height: 1.5rem;
 		object-fit: contain;
+		color: #ff3939;
 		filter: invert(1) brightness(2);
 		transition: filter 0.2s;
 	}
@@ -128,7 +130,7 @@
 	}
 
 	.nav-links a.active {
-		background: var(--theme-accent);
+		background: #ffffff;
 		color: var(--theme-accent-ink);
 		border: 3px solid var(--theme-line);
 		box-shadow: 4px 4px 0 var(--theme-line);
@@ -146,7 +148,7 @@
 
 	.divider {
 		height: 2px;
-		background: #4a2714;
+		background: #ff5900;
 		margin: 1rem 0 0.5rem 0;
 		border-radius: 2px;
 	}
@@ -168,7 +170,7 @@
 	.status {
 		font-family: monospace;
 		font-size: 0.8rem;
-		color: #88ff88;
+		color: #ffffff;
 		font-weight: bold;
 		letter-spacing: 0.05em;
 	}
