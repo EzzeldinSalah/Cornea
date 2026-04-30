@@ -2,7 +2,7 @@ import os
 import json
 import shutil
 from datetime import datetime, timedelta, timezone
-
+import time
 import jwt
 from fastapi import FastAPI, HTTPException, Depends, File, UploadFile, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -16,6 +16,7 @@ from google.auth.transport import requests as google_requests
 import database
 import coach
 import currency_exchange_api
+import analytics
 
 app = FastAPI(title="Cornea API")
 
@@ -150,8 +151,13 @@ class UserSettings(BaseModel):
 @app.get("/api/settings")
 def get_settings(user_id: int = Depends(get_current_user)):
     settings = database.get_user_settings(user_id)
+    user = database.get_user_by_id(user_id)
+    email = user["email"] if user else ""
     if not settings:
-        return UserSettings().model_dump()
+        data = UserSettings().model_dump()
+        data["email"] = email
+        return data
+    settings["email"] = email
     return settings
 
 
@@ -160,13 +166,14 @@ def update_settings(settings: UserSettings, user_id: int = Depends(get_current_u
     database.upsert_user_settings(user_id, settings.model_dump())
     return {"status": "success"}
 
+
 @app.post("/api/avatar")
 async def upload_avatar(file: UploadFile = File(...), user_id: int = Depends(get_current_user)):
     content = await file.read()
-    mime = file.content_type or "image/png"
+    mime = file.content_type
     database.save_user_avatar(user_id, content, mime)
     
-    avatar_url = f"/api/avatar/{user_id}"
+    avatar_url = f"/api/avatar/{user_id}?t={int(time.time())}"
     settings = database.get_user_settings(user_id) or {}
     settings["avatar_url"] = avatar_url
     database.upsert_user_settings(user_id, settings)
@@ -185,6 +192,15 @@ def get_avatar(uid: int):
     if row and row["avatar_blob"]:
         return Response(content=row["avatar_blob"], media_type=row["avatar_mime"])
     raise HTTPException(status_code=404, detail="Avatar not found")
+
+@app.get("/api/analytics")
+def get_analytics(period: str = "30d", user_id: int = Depends(get_current_user)):
+    snapshots = database.get_snapshots()
+    try:
+        metrics = analytics.calculate_metrics(snapshots, period)
+        return metrics
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/account")
 def delete_account(user_id: int = Depends(get_current_user)):
