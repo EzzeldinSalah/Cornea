@@ -1,26 +1,99 @@
 <script lang="ts">
-    let messages = $state([
-        { role: 'assistant', text: 'Ahlan. I\'ve seen your numbers. They are... interesting' }
-    ]);
+    import { onMount } from 'svelte';
+
+    let sessions = $state([]);
+    let currentSessionId = $state(null);
+    let messages = $state([]);
     let inputMessage = $state('');
     let loading = $state(false);
     let chatContainer;
 
+    onMount(async () => {
+        await fetchSessions();
+    });
+
+    async function fetchSessions() {
+        const res = await fetch('/api/coach/sessions');
+        sessions = await res.json();
+        if (sessions.length > 0) {
+            if (!currentSessionId || !sessions.find(s => s.id === currentSessionId)) {
+                currentSessionId = sessions[0].id;
+            }
+            await loadMessages(currentSessionId);
+        } else {
+            await createSession();
+        }
+    }
+
+    async function createSession() {
+        const res = await fetch('/api/coach/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: 'New Chat' })
+        });
+        const newSession = await res.json();
+        sessions = [newSession, ...sessions];
+        currentSessionId = newSession.id;
+        await loadMessages(currentSessionId);
+    }
+
+    async function renameSession() {
+        if (currentSessionId === null) return;
+        const currentSession = sessions.find(s => s.id === currentSessionId);
+        const newTitle = prompt("Enter new chat title:", currentSession.title);
+        if (newTitle && newTitle.trim() !== "") {
+            await fetch(`/api/coach/sessions/${currentSessionId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: newTitle.trim() })
+            });
+            await fetchSessions();
+        }
+    }
+
+    async function deleteSession() {
+        if (currentSessionId === null) return;
+        if (confirm("Are you sure you want to delete this chat?")) {
+            await fetch(`/api/coach/sessions/${currentSessionId}`, {
+                method: 'DELETE'
+            });
+            currentSessionId = null;
+            await fetchSessions();
+        }
+    }
+
+    async function loadMessages(sessionId) {
+        if (sessionId === null) return;
+        const res = await fetch(`/api/coach/sessions/${sessionId}/messages`);
+        const data = await res.json();
+        if (data.messages && data.messages.length > 0) {
+            messages = data.messages;
+        } else {
+            messages = [{ role: 'assistant', text: 'Ahlan. I\'ve seen your numbers. They are... interesting' }];
+        }
+        setTimeout(() => { if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight; }, 100);
+    }
+
+    function handleSessionChange(e) {
+        currentSessionId = parseInt(e.target.value);
+        loadMessages(currentSessionId);
+    }
+
     async function sendMessage() {
-        if (!inputMessage.trim()) return;
+        if (!inputMessage.trim() || currentSessionId === null) return;
         
         const userText = inputMessage;
         messages = [...messages, { role: 'user', text: userText }];
         inputMessage = '';
         loading = true;
 
-        setTimeout(() => chatContainer.scrollTop = chatContainer.scrollHeight, 100);
+        setTimeout(() => { if(chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight }, 100);
 
         try {
             const res = await fetch('/api/coach', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: userText })
+                body: JSON.stringify({ message: userText, session_id: String(currentSessionId) })
             });
             const data = await res.json();
             
@@ -29,7 +102,7 @@
             messages = [...messages, { role: 'assistant', text: `API Error: ${e.message}` }];
         } finally {
             loading = false;
-            setTimeout(() => chatContainer.scrollTop = chatContainer.scrollHeight, 100);
+            setTimeout(() => { if(chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight }, 100);
         }
     }
 
@@ -46,8 +119,22 @@
 </svelte:head>
 
 <div class="page-header">
-    <h1>Coach</h1>
-    <p class="subtitle">Your brutally honest AI financial coach.</p>
+    <div class="header-content">
+        <div>
+            <h1>Coach</h1>
+            <p class="subtitle">Your honest AI financial coach ...</p>
+        </div>
+        <div class="session-controls">
+            <select class="session-select rounded-md" value={currentSessionId} onchange={handleSessionChange}>
+                {#each sessions as session}
+                    <option value={session.id}>{session.title}</option>
+                {/each}
+            </select>
+            <button class="session-btn rounded-lg" onclick={createSession}>New</button>
+            <button class="session-btn rounded-lg" onclick={renameSession}>Rename</button>
+            <button class="session-btn rounded-lg" onclick={deleteSession}>Delete</button>
+        </div>
+    </div>
 </div>
 
 <div class="chat-interface rounded-md" >
@@ -71,7 +158,7 @@
             bind:value={inputMessage} 
             onkeydown={handleKeydown}
             dir="auto"
-            placeholder="Ask about your client revenue or income..."
+            placeholder="Ask Cornea about your progress and next steps ..."
             rows="2"
         ></textarea>
         <button class="send-btn" onclick={sendMessage} disabled={loading || !inputMessage.trim()}>
@@ -83,6 +170,40 @@
 <style>
     .page-header {
         margin-bottom: 2rem;
+    }
+    .header-content {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+    }
+    .session-controls {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        margin-bottom: 0.5rem;
+    }
+    .session-select {
+        padding: 0.5rem;
+        border: 3px solid #2b1e16;
+        background: #fff3e8;
+        font-family: inherit;
+        font-size: 1rem;
+        outline: none;
+        box-shadow: 2px 2px 0 #2b1e16;
+        min-width: 150px;
+    }
+    .session-btn {
+        padding: 0.5rem 1rem;
+        border: 3px solid #2b1e16;
+        background: #e2e3e5;
+        font-weight: bold;
+        cursor: pointer;
+        box-shadow: 2px 2px 0 #2b1e16;
+        transition: all 0.2s;
+    }
+    .session-btn:hover {
+        background: #ff6e32;
+        color: #1f1108;
     }
     h1 {
         font-size: 3rem;

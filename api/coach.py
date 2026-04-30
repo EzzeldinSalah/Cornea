@@ -11,6 +11,7 @@ from langchain_community.chat_message_histories import SQLChatMessageHistory
 env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(dotenv_path=env_path)
 
+
 prompt = ChatPromptTemplate.from_messages([
     ("system", system_prompt),
     MessagesPlaceholder("history"),
@@ -38,7 +39,24 @@ def generate_coach_response(context_data, user_message, session_id):
       response = chain_with_memory.invoke(
           {"input": user_message, "context": context_data},
           config={"configurable": {"session_id": session_id}},
-      ).content
+      ).content[0]["text"]
       return response
     except Exception as e:
         return f"Failed with error: {e}"
+
+def get_formatted_history(session_id: str):
+    history = get_history(session_id)
+    messages = history.messages
+    formatted = []
+    for msg in messages:
+        text = msg.content
+        if isinstance(text, list) and len(text) > 0 and isinstance(text[0], dict):
+            text = text[0].get("text", str(text))
+        elif isinstance(text, dict):
+            text = text.get("text", str(text))
+            
+        if msg.type == "human":
+            formatted.append({"role": "user", "text": str(text)})
+        elif msg.type == "ai":
+            formatted.append({"role": "assistant", "text": str(text)})
+    return formatted

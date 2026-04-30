@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
 import database
 import coach
 import json
@@ -90,6 +89,7 @@ def get_blame():
 
 class CoachRequest(BaseModel):
     message: str
+    session_id: str
 
 @app.post("/api/coach")
 def chat_with_coach(req: CoachRequest):
@@ -105,5 +105,33 @@ def chat_with_coach(req: CoachRequest):
          except Exception:
              context_str = f"Latest income: {latest['total_received_usd']} USD / {latest['total_received_egp']} EGP. EGP rate: {latest['egp_rate_at_date']}"
          
-    reply = coach.generate_coach_response(context_str, req.message)
+    reply = coach.generate_coach_response(context_str, req.message, req.session_id)
     return {"reply": reply}
+
+class SessionCreateRequest(BaseModel):
+    title: str
+
+class SessionRenameRequest(BaseModel):
+    title: str
+
+@app.get("/api/coach/sessions")
+def get_coach_sessions():
+    return database.get_coach_sessions()
+
+@app.post("/api/coach/sessions")
+def create_coach_session(req: SessionCreateRequest):
+    return database.create_session(req.title)
+
+@app.put("/api/coach/sessions/{session_id}")
+def rename_coach_session(session_id: int, req: SessionRenameRequest):
+    database.rename_session(session_id, req.title)
+    return {"status": "success"}
+
+@app.delete("/api/coach/sessions/{session_id}")
+def delete_coach_session(session_id: int):
+    database.delete_session(session_id)
+    return {"status": "success"}
+
+@app.get("/api/coach/sessions/{session_id}/messages")
+def get_coach_session_messages(session_id: str):
+    return {"messages": coach.get_formatted_history(session_id)}

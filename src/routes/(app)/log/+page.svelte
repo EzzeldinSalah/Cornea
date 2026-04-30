@@ -24,7 +24,7 @@
 
 <div class="page-header">
     <h1>log</h1>
-    <p class="subtitle">Your entire financial history, version-controlled.</p>
+    <p class="subtitle">Your version-controlled financial history.</p>
 </div>
 
 {#if loading}
@@ -78,7 +78,7 @@
     .timeline {
         display: flex;
         flex-direction: column;
-        gap: 1.5rem;
+        gap: 1rem;
         border-left: 4px solid var(--theme-line);
         padding-left: 1.75rem;
         margin-left: 1rem;

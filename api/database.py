@@ -35,6 +35,12 @@ def init_db():
         worst_client TEXT
     )
     """)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS coach_sessions (
+        id INTEGER PRIMARY KEY,
+        title TEXT
+    )
+    """)
     conn.commit()
     conn.close()
 
@@ -83,3 +89,42 @@ def get_snapshots():
     rows = c.fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+def create_session(title: str):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT MAX(id) FROM coach_sessions")
+    max_id = c.fetchone()[0]
+    new_id = 0 if max_id is None else max_id + 1
+    
+    c.execute("INSERT INTO coach_sessions (id, title) VALUES (?, ?)", (new_id, title))
+    conn.commit()
+    conn.close()
+    return {"id": new_id, "title": title}
+
+def get_coach_sessions():
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM coach_sessions ORDER BY id DESC")
+    rows = c.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+def rename_session(session_id: int, new_title: str):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE coach_sessions SET title = ? WHERE id = ?", (new_title, session_id))
+    conn.commit()
+    conn.close()
+
+def delete_session(session_id: int):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM coach_sessions WHERE id = ?", (session_id,))
+    try:
+        c.execute("DELETE FROM message_store WHERE session_id = ?", (str(session_id),))
+    except sqlite3.OperationalError:
+        pass # message_store might not exist yet if langchain hasn't initialized it
+    conn.commit()
+    conn.close()
