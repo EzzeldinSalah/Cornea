@@ -7,6 +7,8 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
+from utils.upwork import search_upwork_jobs
+
 env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(dotenv_path=env_path)
 
@@ -81,6 +83,6 @@ def get_client_blame() -> list:
     return get_blame()
 
 
-COACH_TOOLS = [get_income_diff, get_client_blame]
+COACH_TOOLS = [get_income_diff, get_client_blame, search_upwork_jobs]
 COACH_TOOLS_BY_NAME = {t.name: t for t in COACH_TOOLS}
 
