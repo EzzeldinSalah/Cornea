@@ -7,6 +7,7 @@
         class?: string;
         onclick?: () => void;
         disabled?: boolean;
+        type?: 'button' | 'submit' | 'reset';
         children?: Snippet;
     }
     
@@ -16,6 +17,7 @@
         class: className = '', 
         onclick, 
         disabled = false, 
+        type = 'button',
         children 
     }: Props = $props();
 </script>
@@ -25,7 +27,7 @@
         {#if children}{@render children()}{/if}
     </a>
 {:else}
-    <button {onclick} {disabled} class="neo-btn {variant} {className}">
+    <button {onclick} {disabled} {type} class="neo-btn {variant} {className}">
         {#if children}{@render children()}{/if}
     </button>
 {/if}

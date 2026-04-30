@@ -5,6 +5,7 @@
 
     const homeHref = resolve('/');
     const appHref = resolve('/log');
+    const authHref = resolve('/auth');
 </script>
 
 <header class="shell nav-shell">
@@ -19,7 +20,7 @@
             <a href="#build">Model</a>
             <a href={appHref} target="_blank">Dashboard</a>
         </nav>
-        <a href={appHref} target="_blank">
+        <a href={authHref} target="_blank">
             <NeoButton variant="secondary" class="!py-2 !px-4 !text-sm">Login</NeoButton>
         </a>
     </div>

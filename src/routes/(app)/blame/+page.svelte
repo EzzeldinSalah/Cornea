@@ -38,9 +38,9 @@
         {#each clients as c, i}
             <NeoCard variant={i === 0 ? 'worst' : i === clients.length-1 ? 'best' : 'default'} class="!p-6">
                 {#if i === 0}
-                    <div class="badge worst-badge">🚨 WORST CLIENT</div>
+                    <div class="badge worst-badge">WORST CLIENT</div>
                 {:else if i === clients.length - 1}
-                    <div class="badge best-badge">⭐ BEST CLIENT</div>
+                    <div class="badge best-badge">BEST CLIENT</div>
                 {/if}
                 
                 <h2>{c.name}</h2>
@@ -95,10 +95,12 @@
     .worst-badge {
         background: #cc0000;
         color: white;
+        border-radius: 0.75rem;
     }
     .best-badge {
         background: #155724;
         color: white;
+        border-radius: 0.75rem;
     }
     h2 {
         margin-top: 0.5rem;

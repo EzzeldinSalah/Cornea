@@ -5,6 +5,7 @@
 	import logIcon from '$lib/assets/log.png';
 	import diffIcon from '$lib/assets/diff.png';
 	import blameIcon from '$lib/assets/blame.png';
+	import analyticsIcon from '$lib/assets/analytics.svg';
 	import coachIcon from '$lib/assets/coach.png';
 	import settingIcon from '$lib/assets/setting.png';
 </script>
@@ -24,6 +25,9 @@
 		</a>
 		<a href={resolve('/blame')} class:active={page.url.pathname.includes('/blame')}>
 			<img class="icon" src={blameIcon} alt="Blame" /> <span class="text">Blame</span>
+		</a>
+		<a href={resolve('/analytics')} class:active={page.url.pathname.includes('/analytics')}>
+			<img class="icon" src={analyticsIcon} alt="Analytics" /> <span class="text">Analytics</span>
 		</a>
 		<a href={resolve('/coach')} class:active={page.url.pathname.includes('/coach')}>
 			<img class="icon" src={coachIcon} alt="Coach" /> <span class="text">Coach</span>
