@@ -1,3 +1,4 @@
+import json
 import os
 from dotenv import load_dotenv
 from pathlib import Path
@@ -40,10 +41,11 @@ def _run_with_tools(prompt_value):
         for tc in tool_calls:
             tool_fn = COACH_TOOLS_BY_NAME.get(tc["name"])
             if tool_fn is None:
-                result = f"Unknown tool: {tc['name']}"
+                content = json.dumps({"error": f"Unknown tool: {tc['name']}"})
             else:
                 result = tool_fn.invoke(tc.get("args") or {})
-            messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
+                content = json.dumps(result, default=str)
+            messages.append(ToolMessage(content=content, tool_call_id=tc["id"]))
     return response
 
 
