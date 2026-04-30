@@ -8,10 +8,9 @@ load_dotenv(dotenv_path=env_path)
 
 CURRENCY_EXCHANGE_API_URL = os.getenv("CURRENCY_EXCHANGE_API_URL")
 
-# LOL I don't know how it works 😂🥀✌🏻
-def currency_exchange_converter(x: str, y: str):
-    res = requests.get(CURRENCY_EXCHANGE_API_URL)
-    return res.json()[x][y]
+def currency_exchange_converter(base_currency: str, target_currency: str) -> float:
+    response = requests.get(CURRENCY_EXCHANGE_API_URL)
+    return response.json()[base_currency][target_currency]
 
 if __name__ == "__main__":
     print(currency_exchange_converter('usd', 'egp'))
