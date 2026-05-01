@@ -1,23 +1,83 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import NeoCard from '$lib/components/ui/NeoCard.svelte';
-	import NeoButton from '$lib/components/ui/NeoButton.svelte';
+	import { primaryCurrency, toLocal } from '$lib/stores/exchange';
+
+	type MonthlyDatum = {
+		month: string;
+		month_key?: string;
+		invoiced_usd: number;
+		received_usd: number;
+		effective_rate?: number;
+	};
+
+	type ClientDatum = {
+		name: string;
+		total_usd: number;
+		effective_rate: number;
+		avg_payment_days: number;
+	};
+
+	type ForecastDatum = {
+		month: string;
+		projected_usd: number;
+		confidence_low_usd: number;
+		confidence_high_usd: number;
+	};
+
+	type TimelineEntry = {
+		date: string;
+		wait_days: number;
+	};
+
+	type TimelineLane = {
+		name: string;
+		entries: TimelineEntry[];
+	};
+
+	type MonthSummary = {
+		month: string;
+		income_usd: number;
+		effective_rate: number;
+	} | null;
+
+	type AnalyticsData = {
+		period: string;
+		total_invoiced_usd: number;
+		total_received_usd: number;
+		effective_hourly_rate: number;
+		total_fees_usd: number;
+		monthly: MonthlyDatum[];
+		clients: ClientDatum[];
+		fee_breakdown: { upwork_pct: number; transfer_pct: number; kept_pct: number };
+		inflation_index: { month: string; index_value: number }[];
+		forecast: ForecastDatum[];
+		timeline: TimelineLane[];
+		best_month: MonthSummary;
+		worst_month: MonthSummary;
+	};
 
 	let selectedView = $state('reality');
 	let selectedPeriod = $state('30d');
 	let isTransitioning = $state(false);
+	let loading = $state(true);
+	let error = $state('');
 
-	let data = $state({
+	let data = $state<AnalyticsData>({
 		period: '30d',
 		total_invoiced_usd: 0,
-		total_received_local: 0,
+		total_received_usd: 0,
 		effective_hourly_rate: 0,
 		total_fees_usd: 0,
 		monthly: [],
 		clients: [],
 		fee_breakdown: { upwork_pct: 0, transfer_pct: 0, kept_pct: 0 },
 		inflation_index: [],
-		forecast: []
+		forecast: [],
+		timeline: [],
+		best_month: null,
+		worst_month: null
 	});
 
 	const views = [
@@ -41,6 +101,10 @@
 		{ id: 'all_time', label: 'Since I joined Upwork (all time)' }
 	];
 
+	function getToken() {
+		return localStorage.getItem('cornea_token');
+	}
+
 	function handleViewChange(e: Event) {
 		const target = e.target as HTMLSelectElement;
 		const newView = target.value;
@@ -55,23 +119,87 @@
 		}
 	}
 
-	onMount(async () => {
+	async function loadAnalytics(period = selectedPeriod) {
+		const token = getToken();
+		if (!token) {
+			void goto('/auth');
+			return;
+		}
+
+		loading = true;
+		error = '';
 		try {
-			const token = localStorage.getItem('cornea_token');
-			const res = await fetch('/api/analytics?period=' + selectedPeriod, {
+			const res = await fetch('/api/analytics?period=' + encodeURIComponent(period), {
 				headers: { Authorization: `Bearer ${token}` }
 			});
-			if (res.ok) {
-				const fetched = await res.json();
-				data = { ...data, ...fetched };
+			if (res.status === 401) {
+				localStorage.removeItem('cornea_token');
+				void goto('/auth');
+				return;
 			}
+			if (!res.ok) {
+				const body = await res.json().catch(() => ({}));
+				throw new Error(body.detail || 'Failed to load analytics.');
+			}
+
+			const fetched = (await res.json()) as Partial<AnalyticsData>;
+			data = {
+				...data,
+				...fetched,
+				fee_breakdown: { ...data.fee_breakdown, ...fetched.fee_breakdown }
+			};
 		} catch (e) {
 			console.error('Failed to load analytics', e);
+			error = e instanceof Error ? e.message : 'Failed to load analytics.';
+		} finally {
+			loading = false;
 		}
+	}
+
+	onMount(() => {
+		void loadAnalytics();
 	});
 
-	function getMax(arr, key) {
-		return Math.max(...arr.map((d) => d[key]), 0.1);
+	function handlePeriodChange(e: Event) {
+		const target = e.target as HTMLSelectElement;
+		selectedPeriod = target.value;
+		void loadAnalytics(selectedPeriod);
+	}
+
+	function getMax<T extends Record<string, unknown>>(arr: T[], key: keyof T) {
+		return Math.max(...arr.map((d) => Number(d[key]) || 0), 0.1);
+	}
+
+	function formatUsd(value: number) {
+		return `$${value.toLocaleString(undefined, {
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2
+		})}`;
+	}
+
+	function formatLocal(valueUsd: number) {
+		const currency = $primaryCurrency || 'USD';
+		const amount = toLocal(valueUsd);
+		return `${amount.toLocaleString(undefined, {
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2
+		})} ${currency}`;
+	}
+
+	function formatCompactUsd(value: number) {
+		return `$${value.toLocaleString(undefined, {
+			notation: 'compact',
+			maximumFractionDigits: 1
+		})}`;
+	}
+
+	function formatCompactLocal(valueUsd: number) {
+		const currency = $primaryCurrency || 'USD';
+		const amount = toLocal(valueUsd);
+		return `${amount.toLocaleString(undefined, {
+			notation: 'compact',
+			maximumFractionDigits: 1
+		})} ${currency}`;
 	}
 </script>
 
@@ -79,12 +207,12 @@
 	<title>Analytics | Cornea</title>
 </svelte:head>
 
-<div class="analytics-page">
-	<div class="header">
-		<h1>Analytics</h1>
-		<p class="subtitle">Deep insights into your freelance business.</p>
-	</div>
+<div class="page-header">
+	<h1>analytics</h1>
+	<p class="subtitle">Deep insights into your freelance business.</p>
+</div>
 
+<div class="analytics-page">
 	<div class="controls">
 		<div class="control-group">
 			<label for="view-select">View:</label>
@@ -103,53 +231,54 @@
 		{#if selectedView !== 'timeline'}
 			<div class="control-group">
 				<label for="period-select">Period:</label>
-				<select id="period-select" class="theme-select" bind:value={selectedPeriod}>
+				<select
+					id="period-select"
+					class="theme-select"
+					value={selectedPeriod}
+					onchange={handlePeriodChange}
+					disabled={loading}
+				>
 					{#each periods as p}
 						<option value={p.id}>{p.label}</option>
 					{/each}
-					<option value="custom">Custom range...</option>
 				</select>
 			</div>
 		{/if}
 	</div>
 
+	{#if error}
+		<div class="notice error-notice">{error}</div>
+	{:else if loading}
+		<div class="notice">Loading analytics...</div>
+	{/if}
+
 	<div class="stat-cards">
 		<NeoCard class="stat-card">
 			<h3>Total Invoiced</h3>
-			<p class="stat-val">
-				${data.total_invoiced_usd.toLocaleString(undefined, {
-					minimumFractionDigits: 2,
-					maximumFractionDigits: 2
-				})}
-			</p>
+			<p class="stat-val">{formatUsd(data.total_invoiced_usd)}</p>
 		</NeoCard>
 		<NeoCard class="stat-card">
 			<h3>Real Local Received</h3>
-			<p class="stat-val">
-				{data.total_received_local.toLocaleString(undefined, {
-					minimumFractionDigits: 2,
-					maximumFractionDigits: 2
-				})}
-			</p>
+			<p class="stat-val">{formatLocal(data.total_received_usd)}</p>
 		</NeoCard>
 		<NeoCard class="stat-card">
 			<h3>Effective Rate</h3>
-			<p class="stat-val">${data.effective_hourly_rate.toFixed(2)} /hr</p>
+			<p class="stat-val">{formatUsd(data.effective_hourly_rate)} /hr</p>
 		</NeoCard>
 		<NeoCard class="stat-card">
 			<h3>Fees Lost</h3>
-			<p class="stat-val">
-				${data.total_fees_usd.toLocaleString(undefined, {
-					minimumFractionDigits: 2,
-					maximumFractionDigits: 2
-				})}
-			</p>
+			<p class="stat-val">{formatUsd(data.total_fees_usd)}</p>
 		</NeoCard>
 	</div>
 
 	<div class="chart-container" class:faded={isTransitioning}>
-		{#if isTransitioning}
+		{#if isTransitioning || loading}
 			<div class="skeleton"></div>
+		{:else if error}
+			<div class="chart-wrapper">
+				<h3>Analytics unavailable</h3>
+				<p class="chart-desc">{error}</p>
+			</div>
 		{:else if selectedView === 'reality'}
 			<div class="chart-wrapper">
 				<h3>The Reality Check</h3>
@@ -163,14 +292,13 @@
 									class="bar bar-usd"
 									style="height: {(m.invoiced_usd / getMax(data.monthly, 'invoiced_usd')) * 100}%;"
 								>
-									<span class="bar-label">${m.invoiced_usd}</span>
+									<span class="bar-label">{formatCompactUsd(m.invoiced_usd)}</span>
 								</div>
 								<div
 									class="bar bar-local"
-									style="height: {(m.received_local / getMax(data.monthly, 'received_local')) *
-										100}%;"
+									style="height: {(m.received_usd / getMax(data.monthly, 'received_usd')) * 100}%;"
 								>
-									<span class="bar-label">{m.received_local}</span>
+									<span class="bar-label">{formatCompactLocal(m.received_usd)}</span>
 								</div>
 							</div>
 							<p class="month-label">{m.month}</p>
@@ -222,8 +350,8 @@
 							{#each data.clients as c}
 								<tr>
 									<td><strong>{c.name}</strong></td>
-									<td>${c.total_usd.toLocaleString()}</td>
-									<td>${c.effective_rate}/hr</td>
+									<td>{formatUsd(c.total_usd)}</td>
+									<td>{formatUsd(c.effective_rate)}/hr</td>
 									<td>{c.avg_payment_days} days</td>
 									<td>
 										{#if c.avg_payment_days <= 7}
@@ -280,24 +408,28 @@
 		{:else if selectedView === 'bestworst'}
 			<div class="chart-wrapper no-center">
 				<h3>Best vs Worst Month</h3>
-				<div class="comparison-grid">
-					<NeoCard class="best-card" variant="best">
-						<h4>🏆 Best Month</h4>
-						<p class="comp-stat">Income: $4,000</p>
-						<p class="comp-stat">Effective: $75/hr</p>
-						<p class="comp-stat">Clients Active: 3</p>
-					</NeoCard>
-					<NeoCard class="worst-card" variant="worst">
-						<h4>⚠️ Worst Month</h4>
-						<p class="comp-stat">Income: $500</p>
-						<p class="comp-stat">Effective: $15/hr</p>
-						<p class="comp-stat">Clients Active: 1</p>
-					</NeoCard>
-				</div>
-				<div class="insight-box">
-					<strong>Insight:</strong> Your worst month occurred when relying purely on one client who paid
-					slowly.
-				</div>
+				{#if data.best_month && data.worst_month}
+					<div class="comparison-grid">
+						<NeoCard class="best-card" variant="best">
+							<h4>Best Month</h4>
+							<p class="comp-stat">Income: {formatUsd(data.best_month.income_usd)}</p>
+							<p class="comp-stat">Local: {formatLocal(data.best_month.income_usd)}</p>
+							<p class="comp-stat">Effective: {formatUsd(data.best_month.effective_rate)}/hr</p>
+						</NeoCard>
+						<NeoCard class="worst-card" variant="worst">
+							<h4>Worst Month</h4>
+							<p class="comp-stat">Income: {formatUsd(data.worst_month.income_usd)}</p>
+							<p class="comp-stat">Local: {formatLocal(data.worst_month.income_usd)}</p>
+							<p class="comp-stat">Effective: {formatUsd(data.worst_month.effective_rate)}/hr</p>
+						</NeoCard>
+					</div>
+					<div class="insight-box">
+						<strong>Insight:</strong> Compare the best and worst months to spot whether volume, rate,
+						or collection timing moved the needle.
+					</div>
+				{:else}
+					<p class="chart-desc">Not enough monthly history yet.</p>
+				{/if}
 			</div>
 		{:else if selectedView === 'forecast'}
 			<div class="chart-wrapper">
@@ -309,10 +441,10 @@
 							<div class="bar-group">
 								<div
 									class="bar bar-forecast"
-									style="height: {(f.projected_local / getMax(data.forecast, 'confidence_high')) *
+									style="height: {(f.projected_usd / getMax(data.forecast, 'confidence_high_usd')) *
 										100}%;"
 								>
-									<span class="bar-label">{f.projected_local}</span>
+									<span class="bar-label">{formatCompactLocal(f.projected_usd)}</span>
 								</div>
 							</div>
 							<p class="month-label">{f.month}</p>
@@ -325,27 +457,25 @@
 </div>
 
 <style>
-	.analytics-page {
-		padding: 2rem;
-		max-width: 1100px;
-		margin: 0 auto;
-	}
-
-	.header {
-		margin-bottom: 2rem;
+	.page-header {
+		margin-bottom: 3rem;
 	}
 
 	h1 {
-		font-size: 2.5rem;
+		font-size: 3rem;
 		margin: 0;
-		text-transform: uppercase;
-		letter-spacing: -0.02em;
+		text-transform: lowercase;
 	}
 
 	.subtitle {
 		color: var(--theme-muted);
-		font-size: 1.1rem;
+		font-size: 1.2rem;
 		margin-top: 0.5rem;
+	}
+
+	.analytics-page {
+		max-width: 1100px;
+		margin: 0 auto;
 	}
 
 	.controls {
@@ -389,6 +519,25 @@
 		box-shadow: 5px 5px 0 var(--theme-accent);
 	}
 
+	.theme-select:disabled {
+		cursor: wait;
+		opacity: 0.7;
+	}
+
+	.notice {
+		margin-bottom: 1.5rem;
+		padding: 1rem 1.25rem;
+		border: 3px solid var(--theme-line);
+		background: var(--theme-paper);
+		box-shadow: 4px 4px 0 var(--theme-shadow);
+		font-weight: 800;
+	}
+
+	.error-notice {
+		background: #f8d7da;
+		color: #721c24;
+	}
+
 	.stat-cards {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -396,7 +545,7 @@
 		margin-bottom: 2.5rem;
 	}
 
-	.stat-card h3 {
+	:global(.stat-card) h3 {
 		font-family: inherit;
 		font-size: 0.8rem;
 		text-transform: uppercase;
@@ -715,10 +864,6 @@
 	.time-block.yellow {
 		background: #ffeebb;
 	}
-	.time-block.red {
-		background: #ffcccc;
-	}
-
 	/* Best vs worst */
 	.comparison-grid {
 		display: grid;

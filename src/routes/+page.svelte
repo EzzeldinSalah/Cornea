@@ -10,7 +10,7 @@
 	const systemCards = [
 		{
 			title: 'git log for money',
-			description: 'See every Upwork sync as a commit. Track your real EGP income timeline.'
+			description: 'See every Upwork sync as a commit. Track your real local income timeline.'
 		},
 		{
 			title: 'git diff your months',
@@ -30,7 +30,8 @@
 		{ title: '1. Connect Upwork', description: 'One-click OAuth = Zero manual entry.' },
 		{
 			title: '2. Auto Sync',
-			description: 'We pull your invoices, fees, and the daily your local currency.'
+			description:
+				'We pull your invoices and fees, then convert your local view from the live rate.'
 		},
 		{
 			title: '3. Cornea Mind',
@@ -42,7 +43,7 @@
 		{
 			title: 'Analytics Dashboard',
 			description:
-				'Stop guessing your absolute earnings. Detailed month-over-month graphs that measure true buying power after fees and variable currency conversion rates.'
+				'Stop guessing your absolute earnings. Detailed month-over-month graphs that measure true buying power after fees using one live currency rate.'
 		},
 		{
 			title: 'AI Financial Coach',
@@ -60,7 +61,7 @@
 		{
 			question: 'Is it really zero manual entry?',
 			answer:
-				'Yes. Once connected to Upwork, Cornea pulls the data via API. We fetch historical exchange rates to match your payout days.'
+				'Yes. Once connected to Upwork, Cornea pulls the data via API and renders local values from the current live exchange rate.'
 		},
 		{
 			question: 'Does it cost anything?',
@@ -109,9 +110,9 @@
 				probably losing 15-20% of your money before you even see it.
 			</p>
 			<p>
-				Cornea lifts the blindfold. It converts your income history using historical currency
-				exchange rates, strips out the overhead, and gives you a crystal-clear reality check of what
-				your time is actually buying in your local market today.
+				Cornea lifts the blindfold. It converts your income history using the current live exchange
+				rate, strips out the overhead, and gives you a crystal-clear reality check of what your time
+				is actually buying in your local market today.
 			</p>
 		</div>
 	</section>

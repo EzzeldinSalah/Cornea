@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 from utils.prompts import build_system_prompt
-from utils.functions import COACH_TOOLS, COACH_TOOLS_BY_NAME
+from utils.functions import COACH_TOOLS, COACH_TOOLS_BY_NAME, set_active_user_id
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import ToolMessage
@@ -50,7 +50,7 @@ def _run_with_tools(prompt_value):
 
 
 def generate_coach_response(context_data, user_message, session_id,
-                            coach_language="mixed", coach_tone="Balanced"):
+                            coach_language="mixed", coach_tone="Balanced", user_id=None):
     system_prompt = build_system_prompt(coach_language, coach_tone)
 
     prompt = ChatPromptTemplate.from_messages([
@@ -69,6 +69,7 @@ def generate_coach_response(context_data, user_message, session_id,
     )
 
     try:
+        set_active_user_id(user_id)
         response = chain_with_memory.invoke(
             {"input": user_message, "context": context_data},
             config={"configurable": {"session_id": session_id}},
@@ -79,6 +80,8 @@ def generate_coach_response(context_data, user_message, session_id,
         return str(content)
     except Exception as e:
         return f"Failed with error: {e}"
+    finally:
+        set_active_user_id(None)
 
 
 def get_formatted_history(session_id: str):

@@ -5,9 +5,78 @@ import random
 
 DB_FILE = "cornea.db"
 
+SNAPSHOT_COLUMNS = [
+    "id",
+    "created_at",
+    "upwork_sync_date",
+    "total_invoiced_usd",
+    "total_fees_usd",
+    "total_received_usd",
+    "clients_json",
+    "user_id",
+    "source",
+    "platform_transaction_id",
+]
+
+SNAPSHOT_DEFAULTS = {
+    "id": "NULL",
+    "created_at": "NULL",
+    "upwork_sync_date": "NULL",
+    "total_invoiced_usd": "0",
+    "total_fees_usd": "0",
+    "total_received_usd": "0",
+    "clients_json": "NULL",
+    "user_id": "1",
+    "source": "'upwork'",
+    "platform_transaction_id": "NULL",
+}
+
+OBSOLETE_SNAPSHOT_COLUMNS = {
+    "egp_rate_at_date",
+    "total_received_egp",
+    "currency_code",
+    "local_rate",
+}
+
 
 def get_connection():
     return sqlite3.connect(DB_FILE)
+
+
+def migrate_snapshots_to_usd_only(cursor):
+    cursor.execute("PRAGMA table_info(snapshots)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    if not existing_columns.intersection(OBSOLETE_SNAPSHOT_COLUMNS):
+        return
+
+    cursor.execute("ALTER TABLE snapshots RENAME TO snapshots_legacy")
+    cursor.execute("""
+    CREATE TABLE snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT,
+        upwork_sync_date TEXT,
+        total_invoiced_usd REAL,
+        total_fees_usd REAL,
+        total_received_usd REAL,
+        clients_json TEXT,
+        user_id INTEGER NOT NULL DEFAULT 1,
+        source TEXT DEFAULT 'upwork',
+        platform_transaction_id TEXT
+    )
+    """)
+
+    select_exprs = [
+        column if column in existing_columns else SNAPSHOT_DEFAULTS[column]
+        for column in SNAPSHOT_COLUMNS
+    ]
+    cursor.execute(
+        f"""
+        INSERT INTO snapshots ({", ".join(SNAPSHOT_COLUMNS)})
+        SELECT {", ".join(select_exprs)}
+        FROM snapshots_legacy
+        """
+    )
+    cursor.execute("DROP TABLE snapshots_legacy")
 
 
 def init_db():
@@ -15,34 +84,33 @@ def init_db():
     c = conn.cursor()
 
     c.execute("""
-    CREATE TABLE IF NOT EXISTS snapshots (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        created_at TEXT,
-        upwork_sync_date TEXT,
-        total_invoiced_usd REAL,
-        total_fees_usd REAL,
-        total_received_usd REAL,
-        egp_rate_at_date REAL,
-        total_received_egp REAL,
-        clients_json TEXT
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS monthly_summaries (
-        month TEXT PRIMARY KEY,
-        invoiced_usd REAL,
-        received_egp REAL,
-        avg_payment_wait_days REAL,
-        top_client TEXT,
-        worst_client TEXT
-    )
-    """)
+	    CREATE TABLE IF NOT EXISTS snapshots (
+	        id INTEGER PRIMARY KEY AUTOINCREMENT,
+	        created_at TEXT,
+	        upwork_sync_date TEXT,
+	        total_invoiced_usd REAL,
+	        total_fees_usd REAL,
+	        total_received_usd REAL,
+	        clients_json TEXT,
+	        user_id INTEGER NOT NULL DEFAULT 1,
+	        source TEXT DEFAULT 'upwork',
+	        platform_transaction_id TEXT
+	    )
+	    """)
 
     c.execute("""
     CREATE TABLE IF NOT EXISTS coach_sessions (
         id INTEGER PRIMARY KEY,
-        title TEXT
+        title TEXT,
+        user_id INTEGER
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS message_store (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT,
+        message TEXT
     )
     """)
 
@@ -85,14 +153,33 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    try:
+        c.execute("ALTER TABLE snapshots ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE snapshots ADD COLUMN source TEXT DEFAULT 'upwork'")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE snapshots ADD COLUMN platform_transaction_id TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE coach_sessions ADD COLUMN user_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
+
+    migrate_snapshots_to_usd_only(c)
+
     conn.commit()
     conn.close()
 
 
-def generate_mock_data():
+def generate_mock_data(user_id: int):
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT count(*) FROM snapshots")
+    c.execute("SELECT count(*) FROM snapshots WHERE user_id = ?", (user_id,))
     if c.fetchone()[0] > 0:
         conn.close()
         return
@@ -105,8 +192,6 @@ def generate_mock_data():
         invoiced = random.randint(800, 2000)
         fees = invoiced * 0.10
         received_usd = invoiced - fees
-        egp_rate = random.uniform(47.0, 50.0)
-        received_egp = received_usd * egp_rate
 
         client_data = []
         for _ in range(random.randint(1, 3)):
@@ -118,69 +203,97 @@ def generate_mock_data():
             })
 
         c.execute("""
-        INSERT INTO snapshots (created_at, upwork_sync_date, total_invoiced_usd, total_fees_usd,
-                               total_received_usd, egp_rate_at_date, total_received_egp, clients_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (date_str, date_str, invoiced, fees, received_usd, egp_rate, received_egp,
-              json.dumps(client_data)))
+        INSERT INTO snapshots (
+            created_at,
+            upwork_sync_date,
+            total_invoiced_usd,
+            total_fees_usd,
+            total_received_usd,
+            clients_json,
+            user_id,
+            source,
+            platform_transaction_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            date_str,
+            date_str,
+            invoiced,
+            fees,
+            received_usd,
+            json.dumps(client_data),
+            user_id,
+            "upwork",
+            f"mock-{user_id}-{i}",
+        ))
 
     conn.commit()
     conn.close()
 
 
-def get_snapshots():
+def get_snapshots(user_id: int):
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
-    c.execute("SELECT * FROM snapshots ORDER BY created_at DESC")
+    c.execute("SELECT * FROM snapshots WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     rows = c.fetchall()
     conn.close()
     return [dict(row) for row in rows]
 
 
-def clear_snapshots():
+def snapshot_usd_payload(snapshot: dict):
+    return {key: snapshot.get(key) for key in SNAPSHOT_COLUMNS if key in snapshot}
+
+
+def clear_snapshots(user_id: int):
     conn = get_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM snapshots")
+    c.execute("DELETE FROM snapshots WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
 
 
-def create_session(title: str):
+def create_session(title: str, user_id: int):
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT MAX(id) FROM coach_sessions")
     max_id = c.fetchone()[0]
     new_id = 0 if max_id is None else max_id + 1
 
-    c.execute("INSERT INTO coach_sessions (id, title) VALUES (?, ?)", (new_id, title))
+    c.execute(
+        "INSERT INTO coach_sessions (id, title, user_id) VALUES (?, ?, ?)",
+        (new_id, title, user_id),
+    )
     conn.commit()
     conn.close()
     return {"id": new_id, "title": title}
 
 
-def get_coach_sessions():
+def get_coach_sessions(user_id: int):
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
-    c.execute("SELECT * FROM coach_sessions ORDER BY id DESC")
+    c.execute("SELECT * FROM coach_sessions WHERE user_id = ? ORDER BY id DESC", (user_id,))
     rows = c.fetchall()
     conn.close()
     return [dict(row) for row in rows]
 
 
-def rename_session(session_id: int, new_title: str):
+def rename_session(session_id: int, new_title: str, user_id: int):
     conn = get_connection()
     c = conn.cursor()
-    c.execute("UPDATE coach_sessions SET title = ? WHERE id = ?", (new_title, session_id))
+    c.execute(
+        "UPDATE coach_sessions SET title = ? WHERE id = ? AND user_id = ?",
+        (new_title, session_id, user_id),
+    )
     conn.commit()
     conn.close()
 
 
-def delete_session(session_id: int):
+def delete_session(session_id: int, user_id: int):
     conn = get_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM coach_sessions WHERE id = ?", (session_id,))
+    c.execute("DELETE FROM coach_sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
     try:
         c.execute("DELETE FROM message_store WHERE session_id = ?", (str(session_id),))
     except sqlite3.OperationalError:
@@ -255,11 +368,15 @@ def delete_user(user_id: int):
     conn = get_connection()
     c = conn.cursor()
     c.execute("DELETE FROM user_settings WHERE user_id = ?", (user_id,))
-    c.execute("DELETE FROM coach_sessions")
-    try:
-        c.execute("DELETE FROM message_store")
-    except sqlite3.OperationalError:
-        pass
+    c.execute("DELETE FROM snapshots WHERE user_id = ?", (user_id,))
+    c.execute("SELECT id FROM coach_sessions WHERE user_id = ?", (user_id,))
+    session_ids = [row[0] for row in c.fetchall()]
+    c.execute("DELETE FROM coach_sessions WHERE user_id = ?", (user_id,))
+    for sid in session_ids:
+        try:
+            c.execute("DELETE FROM message_store WHERE session_id = ?", (str(sid),))
+        except sqlite3.OperationalError:
+            pass
     c.execute("DELETE FROM users WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
@@ -346,10 +463,10 @@ def export_user_data(user_id: int):
         if "avatar_blob" in settings_data:
             del settings_data["avatar_blob"]
 
-    c.execute("SELECT * FROM snapshots ORDER BY created_at DESC")
-    snapshots = [dict(row) for row in c.fetchall()]
+    c.execute("SELECT * FROM snapshots WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+    snapshots = [snapshot_usd_payload(dict(row)) for row in c.fetchall()]
 
-    c.execute("SELECT * FROM coach_sessions ORDER BY id")
+    c.execute("SELECT * FROM coach_sessions WHERE user_id = ? ORDER BY id", (user_id,))
     sessions = [dict(row) for row in c.fetchall()]
 
     conn.close()
@@ -360,3 +477,16 @@ def export_user_data(user_id: int):
         "snapshots": snapshots,
         "coach_sessions": sessions,
     }
+
+
+def get_coach_session_by_id(session_id: int, user_id: int):
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute(
+        "SELECT * FROM coach_sessions WHERE id = ? AND user_id = ?",
+        (session_id, user_id),
+    )
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None

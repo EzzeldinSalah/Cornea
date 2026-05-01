@@ -195,9 +195,8 @@ def get_avatar(uid: int):
 
 @app.get("/api/analytics")
 def get_analytics(period: str = "30d", user_id: int = Depends(get_current_user)):
-    snapshots = database.get_snapshots()
     try:
-        metrics = analytics.calculate_metrics(snapshots, period)
+        metrics = analytics.calculate_metrics(user_id, period)
         return metrics
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -210,7 +209,7 @@ def delete_account(user_id: int = Depends(get_current_user)):
 
 @app.delete("/api/snapshots")
 def clear_all_snapshots(user_id: int = Depends(get_current_user)):
-    database.clear_snapshots()
+    database.clear_snapshots(user_id)
     return {"status": "success"}
 
 
@@ -220,33 +219,43 @@ def export_data(user_id: int = Depends(get_current_user)):
 
 
 @app.post("/api/sync/mock")
-def sync_mock_data():
-    database.generate_mock_data()
+def sync_mock_data(user_id: int = Depends(get_current_user)):
+    database.generate_mock_data(user_id)
     return {"status": "Mock data generated successfully"}
 
 
+@app.get("/api/exchange-rate")
+def get_exchange_rate(currency: str):
+    """Returns the live exchange rate for the given currency relative to USD."""
+    rate = currency_exchange_converter("usd", currency)
+    return {
+        "currency": currency.upper(),
+        "rate": rate,
+        "fetched_at": datetime.utcnow().isoformat() + "Z"
+    }
+
+
 @app.get("/api/log")
-def get_log():
-    snapshots = database.get_snapshots()
+def get_log(user_id: int = Depends(get_current_user)):
+    snapshots = [database.snapshot_usd_payload(s) for s in database.get_snapshots(user_id)]
     for s in snapshots:
         if s.get("clients_json"):
             s["clients"] = json.loads(s["clients_json"])
             del s["clients_json"]
-    try:
-        live_rate = currency_exchange_converter('usd', 'egp')
-    except Exception:
-        live_rate = None
-    return {"snapshots": snapshots, "live_rate": live_rate}
+
+    return {
+        "snapshots": snapshots
+    }
 
 
 @app.get("/api/diff")
-def get_diff_api():
-    return get_diff()
+def get_diff_api(user_id: int = Depends(get_current_user)):
+    return get_diff(user_id)
 
 
 @app.get("/api/blame")
-def get_blame_api():
-    return get_blame()
+def get_blame_api(user_id: int = Depends(get_current_user)):
+    return get_blame(user_id)
 
 
 class CoachRequest(BaseModel):
@@ -261,63 +270,56 @@ class SessionRenameRequest(BaseModel):
 
 
 @app.post("/api/coach")
-def chat_with_coach(req: CoachRequest, user_id: Optional[int] = Depends(get_optional_user)):
-    coach_language = "mixed"
-    coach_tone = "Balanced"
-    if user_id:
-        user_settings = database.get_user_settings(user_id)
-        if user_settings:
-            coach_language = user_settings.get("coach_language", "mixed")
-            coach_tone = user_settings.get("coach_tone", "Balanced")
+def chat_with_coach(req: CoachRequest, user_id: int = Depends(get_current_user)):
+    user_settings = database.get_user_settings(user_id) or {}
+    coach_language = user_settings.get("coach_language", "mixed")
+    coach_tone = user_settings.get("coach_tone", "Balanced")
 
-    snapshots = database.get_snapshots()
+    snapshots = database.get_snapshots(user_id)
     if not snapshots:
         context_str = "No data available."
     else:
         latest = snapshots[0]
-        try:
-            live_rate = currency_exchange_converter('usd', 'egp')
-            current_egp = latest['total_received_usd'] * live_rate
-            context_str = (
-                f"Latest income: {latest['total_received_usd']} USD / {current_egp} EGP "
-                f"(live rate: {live_rate}). "
-                f"Historical rate at invoice: {latest['egp_rate_at_date']}"
-            )
-        except Exception:
-            context_str = (
-                f"Latest income: {latest['total_received_usd']} USD / "
-                f"{latest['total_received_egp']} EGP. Rate: {latest['egp_rate_at_date']}"
-            )
+        context_str = (
+            f"Latest income: {latest['total_received_usd']} USD."
+        )
 
     reply = coach.generate_coach_response(
-        context_str, req.message, req.session_id,
-        coach_language=coach_language, coach_tone=coach_tone,
+        context_str,
+        req.message,
+        req.session_id,
+        coach_language=coach_language,
+        coach_tone=coach_tone,
+        user_id=user_id,
     )
     return {"reply": reply}
 
 
 @app.get("/api/coach/sessions")
-def get_coach_sessions():
-    return database.get_coach_sessions()
+def get_coach_sessions(user_id: int = Depends(get_current_user)):
+    return database.get_coach_sessions(user_id)
 
 
 @app.post("/api/coach/sessions")
-def create_coach_session(req: SessionCreateRequest):
-    return database.create_session(req.title)
+def create_coach_session(req: SessionCreateRequest, user_id: int = Depends(get_current_user)):
+    return database.create_session(req.title, user_id)
 
 
 @app.put("/api/coach/sessions/{session_id}")
-def rename_coach_session(session_id: int, req: SessionRenameRequest):
-    database.rename_session(session_id, req.title)
+def rename_coach_session(session_id: int, req: SessionRenameRequest, user_id: int = Depends(get_current_user)):
+    database.rename_session(session_id, req.title, user_id)
     return {"status": "success"}
 
 
 @app.delete("/api/coach/sessions/{session_id}")
-def delete_coach_session(session_id: int):
-    database.delete_session(session_id)
+def delete_coach_session(session_id: int, user_id: int = Depends(get_current_user)):
+    database.delete_session(session_id, user_id)
     return {"status": "success"}
 
 
 @app.get("/api/coach/sessions/{session_id}/messages")
-def get_coach_session_messages(session_id: str):
-    return {"messages": coach.get_formatted_history(session_id)}
+def get_coach_session_messages(session_id: int, user_id: int = Depends(get_current_user)):
+    session = database.get_coach_session_by_id(session_id, user_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"messages": coach.get_formatted_history(str(session_id))}

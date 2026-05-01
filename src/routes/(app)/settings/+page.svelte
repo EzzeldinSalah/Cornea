@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import NeoButton from '$lib/components/ui/NeoButton.svelte';
+	import { loadExchangeRate } from '$lib/stores/exchange';
 
 	let settings = $state({
 		email: '',
@@ -79,8 +80,10 @@
 				headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
 				body: JSON.stringify(settings)
 			});
-			if (res.ok) alert('Settings saved successfully!');
-			else alert('Failed to save settings.');
+			if (res.ok) {
+				await loadExchangeRate(settings.primary_currency, token);
+				alert('Settings saved successfully!');
+			} else alert('Failed to save settings.');
 		} catch (e) {
 			alert('Error saving settings.');
 		} finally {
@@ -191,7 +194,7 @@
 			<section class="settings-card">
 				<h2>👤 Profile</h2>
 				<div class="form-group">
-					<label>Avatar</label>
+					<div class="field-label">Avatar</div>
 					<div class="avatar-preview">
 						<div class="avatar-circle">
 							{#if avatarPreview}
@@ -325,7 +328,7 @@
 					<label class="toggle-label">
 						<input type="checkbox" bind:checked={settings.notify_exchange_rate} />
 						<span class="custom-checkbox"></span>
-						Exchange Rate Alert (USD/EGP drastic moves)
+						Exchange Rate Alert (USD/{settings.primary_currency} drastic moves)
 					</label>
 				</div>
 			</section>
@@ -488,7 +491,8 @@
 		gap: 0.5rem;
 	}
 
-	label {
+	label,
+	.field-label {
 		font-weight: 700;
 		font-size: 0.9rem;
 		text-transform: uppercase;

@@ -39,12 +39,12 @@
 		<div class="divider"></div>
 		<p class="section-label">Coming Soon</p>
 
-		<a href="#" class="disabled">
+		<div class="disabled-link" aria-disabled="true">
 			<span class="icon emoji">🌿</span> <span class="text">Branch</span>
-		</a>
-		<a href="#" class="disabled">
+		</div>
+		<div class="disabled-link" aria-disabled="true">
 			<span class="icon emoji">🔀</span> <span class="text">Merge</span>
-		</a>
+		</div>
 	</nav>
 
 	<div class="footer">
@@ -93,7 +93,8 @@
 		flex: 1;
 	}
 
-	.nav-links a {
+	.nav-links a,
+	.nav-links .disabled-link {
 		display: flex;
 		align-items: center;
 		gap: 1rem;
@@ -127,7 +128,7 @@
 		letter-spacing: 0.05em;
 	}
 
-	.nav-links a:not(.disabled):not(.active):hover {
+	.nav-links a:not(.active):hover {
 		background: #4a2714;
 		color: var(--theme-paper);
 		transform: translate(2px, -2px);
@@ -145,7 +146,7 @@
 		filter: invert(0);
 	}
 
-	.nav-links a.disabled {
+	.nav-links .disabled-link {
 		opacity: 0.4;
 		cursor: not-allowed;
 	}

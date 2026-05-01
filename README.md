@@ -10,8 +10,8 @@ cornea/
     main.py               # All API routes
     database.py           # SQLite operations (snapshots, users, settings)
     coach.py              # LangChain + Gemini AI coach logic
-    prompts.py            # Dynamic system prompt builder (tone + language)
-    currency_exchange_api.py  # Live exchange rate fetcher
+    utils/prompts.py      # Dynamic system prompt builder (tone + language)
+    utils/functions.py    # Live exchange rate fetcher + analytics helpers
     requirements.txt      # Python dependencies
   src/                    # Frontend (SvelteKit)
     routes/
@@ -45,6 +45,8 @@ GEMINI_API_KEY=your-google-gemini-api-key
 CURRENCY_EXCHANGE_API_URL=https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json
 PUBLIC_GOOGLE_CLIENT_ID=your-google-oauth-client-id
 JWT_SECRET=any-random-string-for-signing-tokens
+INFLATION_RATE_PCT=2
+FORECAST_GROWTH_RATE=1.05
 ```
 
 `PUBLIC_GOOGLE_CLIENT_ID` uses the `PUBLIC_` prefix so SvelteKit exposes it to the browser (needed for the Google sign-in button). All other variables stay server-side only.
@@ -75,14 +77,13 @@ On first visit, go to the Log page and click "Run Mock Sync" to populate the dat
 
 SQLite file at `api/cornea.db`. Tables:
 
-| Table                 | Purpose                                                              |
-| --------------------- | -------------------------------------------------------------------- |
-| `snapshots`         | Financial history entries (invoices, fees, rates)                    |
-| `monthly_summaries` | Aggregated monthly data                                              |
-| `coach_sessions`    | Chat session titles                                                  |
-| `message_store`     | Chat message history (created by LangChain)                          |
-| `users`             | Accounts (email, bcrypt password hash, Google ID)                    |
-| `user_settings`     | Per-user preferences (language, currency, coach tone, notifications, and avatar BLOBs) |
+| Table            | Purpose                                                                                |
+| ---------------- | -------------------------------------------------------------------------------------- |
+| `snapshots`      | Financial history entries (invoices, fees, rates)                                      |
+| `coach_sessions` | Chat session titles                                                                    |
+| `message_store`  | Chat message history (created by LangChain)                                            |
+| `users`          | Accounts (email, bcrypt password hash, Google ID)                                      |
+| `user_settings`  | Per-user preferences (language, currency, coach tone, notifications, and avatar BLOBs) |
 
 To reset everything, stop the server and delete `cornea.db`. It will be recreated on next startup.
 
