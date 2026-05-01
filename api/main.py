@@ -16,6 +16,8 @@ from google.auth.transport import requests as google_requests
 import database
 import coach
 import analytics
+import pulse
+from pulse_data import MARKET_DATA, COUNTRY_DATA, WORKING_WINDOWS, VALID_EXP_BRACKETS
 from utils.functions import get_diff, get_blame, currency_exchange_converter
 
 app = FastAPI(title="Cornea API")
@@ -66,9 +68,13 @@ def get_optional_user(
     except jwt.PyJWTError:
         return None
 
+
 @app.on_event("startup")
 def startup_event():
     database.init_db()
+
+
+# ── Auth Models ──────────────────────────────────────────────────────────────
 
 class RegisterRequest(BaseModel):
     email: str
@@ -85,6 +91,8 @@ class ChangePasswordRequest(BaseModel):
     old_password: str
     new_password: str
 
+
+# ── Auth Endpoints ────────────────────────────────────────────────────────────
 
 @app.post("/api/auth/register")
 def register(req: RegisterRequest):
@@ -133,6 +141,9 @@ def change_password(req: ChangePasswordRequest, user_id: int = Depends(get_curre
         raise HTTPException(status_code=401, detail="Current password is incorrect")
     database.update_user_password(user_id, get_password_hash(req.new_password))
     return {"status": "success"}
+
+
+# ── Settings & Avatar ─────────────────────────────────────────────────────────
 
 class UserSettings(BaseModel):
     display_name: str = ""
@@ -193,6 +204,9 @@ def get_avatar(uid: int):
         return Response(content=row["avatar_blob"], media_type=row["avatar_mime"])
     raise HTTPException(status_code=404, detail="Avatar not found")
 
+
+# ── Analytics & Account ───────────────────────────────────────────────────────
+
 @app.get("/api/analytics")
 def get_analytics(period: str = "30d", user_id: int = Depends(get_current_user)):
     try:
@@ -200,6 +214,7 @@ def get_analytics(period: str = "30d", user_id: int = Depends(get_current_user))
         return metrics
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.delete("/api/account")
 def delete_account(user_id: int = Depends(get_current_user)):
@@ -235,6 +250,8 @@ def get_exchange_rate(currency: str):
     }
 
 
+# ── Log / Diff / Blame ────────────────────────────────────────────────────────
+
 @app.get("/api/log")
 def get_log(user_id: int = Depends(get_current_user)):
     snapshots = [database.snapshot_usd_payload(s) for s in database.get_snapshots(user_id)]
@@ -242,15 +259,13 @@ def get_log(user_id: int = Depends(get_current_user)):
         if s.get("clients_json"):
             s["clients"] = json.loads(s["clients_json"])
             del s["clients_json"]
-
-    return {
-        "snapshots": snapshots
-    }
+    return {"snapshots": snapshots}
 
 
 @app.get("/api/diff")
 def get_diff_api(base: int = Query(None), compare: int = Query(None), user_id: int = Depends(get_current_user)):
     return get_diff(user_id, base, compare)
+
 
 @app.post("/api/diff/insight")
 def get_diff_insight_api(diff_data: dict, user_id: int = Depends(get_current_user)):
@@ -264,11 +279,12 @@ def get_blame_api(user_id: int = Depends(get_current_user)):
     return get_blame(user_id)
 
 
-# --- MERGE APIs ---
+# ── Sources & Merge ───────────────────────────────────────────────────────────
 
 @app.get("/api/sources")
 def get_sources_api(user_id: int = Depends(get_current_user)):
     return database.get_income_sources(user_id)
+
 
 @app.post("/api/sources/{source_id}/sync")
 def sync_source_api(source_id: str, user_id: int = Depends(get_current_user)):
@@ -277,6 +293,7 @@ def sync_source_api(source_id: str, user_id: int = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Source not found")
     return {"status": "success"}
 
+
 class ManualTransaction(BaseModel):
     description: str
     amount: float
@@ -284,14 +301,17 @@ class ManualTransaction(BaseModel):
     date: str
     source_label: str
 
+
 @app.post("/api/transactions/manual")
 def add_manual_transaction_api(req: ManualTransaction, user_id: int = Depends(get_current_user)):
     database.add_manual_transaction(user_id, req.model_dump())
     return {"status": "success"}
 
+
 @app.get("/api/merge/timeline")
 def get_merge_timeline_api(user_id: int = Depends(get_current_user)):
     return database.get_uncommitted_transactions(user_id)
+
 
 @app.get("/api/merge/reconciliation")
 def get_merge_reconciliation_api(user_id: int = Depends(get_current_user)):
@@ -299,24 +319,25 @@ def get_merge_reconciliation_api(user_id: int = Depends(get_current_user)):
     total_usd = sum(t["amount_usd"] for t in uncommitted)
     total_fees = sum(t["platform_fee"] for t in uncommitted)
     total_local = sum(t["amount_local"] for t in uncommitted)
-    
+
     kept_pct = 0
     if total_usd > 0:
         kept_pct = ((total_usd - total_fees) / total_usd) * 100
-        
+
     sources_dict = {}
     for t in uncommitted:
         sources_dict[t["source"]] = sources_dict.get(t["source"], 0) + t["amount_usd"]
-        
+
     sources_list = [{"name": k, "contribution_usd": v} for k, v in sources_dict.items()]
-    
+
     return {
         "total_usd": total_usd,
         "total_local": total_local,
         "total_fees": total_fees,
         "kept_percentage": kept_pct,
-        "sources": sources_list
+        "sources": sources_list,
     }
+
 
 @app.post("/api/merge/commit")
 def commit_merge_api(user_id: int = Depends(get_current_user)):
@@ -325,7 +346,217 @@ def commit_merge_api(user_id: int = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="No unmerged transactions to commit.")
     return {"status": "success"}
 
-# --- COACH APIs ---
+
+# ── Pulse ─────────────────────────────────────────────────────────────────────
+
+class PulseRequest(BaseModel):
+    job_title: str          # must match a key in MARKET_DATA (e.g. "react-developer")
+    years_experience: str   # must be one of VALID_EXP_BRACKETS (e.g. "1-3")
+    country: str            # must match a key in COUNTRY_DATA (e.g. "egypt")
+    current_rate: Optional[float] = None  # user's current hourly rate in USD, optional
+
+
+@app.post("/api/pulse")
+def get_pulse(req: PulseRequest, user_id: Optional[int] = Depends(get_optional_user)):
+    """
+    Main Pulse endpoint. Accepts the three core inputs plus an optional current rate.
+    Returns the full structured report: data sections computed here, AI sections
+    generated by pulse.py.
+
+    Works for both authenticated and anonymous users. When authenticated, reads
+    coach_language and coach_tone from the user's settings so the AI brief matches
+    their Coach page preferences.
+    """
+
+    # --- 1. Validate inputs against the curated dataset ---
+    role_key = req.job_title.lower().strip()
+    if role_key not in MARKET_DATA:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported job title: '{req.job_title}'. "
+                   f"Supported values: {list(MARKET_DATA.keys())}"
+        )
+
+    exp_key = req.years_experience.strip()
+    if exp_key not in VALID_EXP_BRACKETS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid experience bracket: '{req.years_experience}'. "
+                   f"Must be one of: {VALID_EXP_BRACKETS}"
+        )
+
+    country_key = req.country.lower().strip()
+    if country_key not in COUNTRY_DATA:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported country: '{req.country}'. "
+                   f"Supported values: {list(COUNTRY_DATA.keys())}"
+        )
+
+    # --- 2. Pull structured data from the curated dataset ---
+    role_data = MARKET_DATA[role_key]
+    bracket_data = role_data[exp_key]
+    country_data = COUNTRY_DATA[country_key]
+
+    market_rates = {
+        "floor":  bracket_data["floor"],
+        "median": bracket_data["median"],
+        "target": bracket_data["target"],
+    }
+    demand        = bracket_data["demand"]
+    saturation    = bracket_data["saturation"]
+    timing_signal = bracket_data["timing_signal"]
+
+    # --- 3. Fetch reference exchange rate (static) ---
+    try:
+        live_rate = currency_exchange_converter('usd', country_data["currency"].lower())
+    except Exception:
+        live_rate = None  # report will show USD only, no local conversion
+
+    # --- 4. Compute rate ranges in local currency ---
+    def to_local(usd_amount: float) -> float | None:
+        if live_rate is None:
+            return None
+        return round(usd_amount * live_rate, 2)
+
+    rate_ranges = {
+        "floor":  {"usd": market_rates["floor"],  "local": to_local(market_rates["floor"])},
+        "median": {"usd": market_rates["median"], "local": to_local(market_rates["median"])},
+        "target": {"usd": market_rates["target"], "local": to_local(market_rates["target"])},
+    }
+
+    # --- 5. Compute Position Indicator ---
+    position_indicator = None
+    position_gap_pct = None
+    if req.current_rate is not None:
+        median = market_rates["median"]
+        gap_pct = ((req.current_rate - median) / median) * 100
+        position_gap_pct = round(gap_pct, 1)
+        if gap_pct < -20:
+            position_indicator = "Underpriced"
+        elif gap_pct > 20:
+            position_indicator = "Premium"
+        else:
+            position_indicator = "Market-Aligned"
+
+    # --- 6. Compute Purchasing Power (monthly income scenarios) ---
+    workloads = {
+        "conservative": {"hours_per_month": 40,  "label": "Conservative (10 hrs/week)"},
+        "typical":      {"hours_per_month": 80,  "label": "Typical (20 hrs/week)"},
+        "optimistic":   {"hours_per_month": 120, "label": "Optimistic (30 hrs/week)"},
+    }
+    purchasing_power = {}
+    for workload_key, workload in workloads.items():
+        h = workload["hours_per_month"]
+        purchasing_power[workload_key] = {
+            "label": workload["label"],
+            "floor_usd":  round(market_rates["floor"]  * h, 2),
+            "median_usd": round(market_rates["median"] * h, 2),
+            "target_usd": round(market_rates["target"] * h, 2),
+            "floor_local":  to_local(market_rates["floor"]  * h),
+            "median_local": to_local(market_rates["median"] * h),
+            "target_local": to_local(market_rates["target"] * h),
+        }
+
+    col_reference = {
+        "amount_usd": country_data["col_reference_usd"],
+        "label": country_data["col_label"],
+        "amount_local": to_local(country_data["col_reference_usd"]),
+    }
+
+    # --- 7. Read user settings for AI tone/language (if logged in) ---
+    coach_language = "mixed"
+    coach_tone = "Balanced"
+    if user_id:
+        user_settings = database.get_user_settings(user_id)
+        if user_settings:
+            coach_language = user_settings.get("coach_language", "mixed")
+            coach_tone = user_settings.get("coach_tone", "Balanced")
+
+    # --- 8. Call AI for all narrative/interpretive sections ---
+    ai_sections = pulse.generate_pulse_ai_sections(
+        role_label=role_data["label"],
+        exp_bracket=exp_key,
+        country_label=country_data["label"],
+        market_rates=market_rates,
+        demand=demand,
+        saturation=saturation,
+        timing_signal=timing_signal,
+        current_rate=req.current_rate,
+        coach_language=coach_language,
+        coach_tone=coach_tone,
+    )
+
+    # --- 9. Assemble and return the full response ---
+    return {
+        "inputs": {
+            "job_title":        role_key,
+            "job_title_label":  role_data["label"],
+            "years_experience": exp_key,
+            "country":          country_key,
+            "country_label":    country_data["label"],
+            "currency":         country_data["currency"],
+            "current_rate":     req.current_rate,
+        },
+        "position_indicator": {
+            "status":       position_indicator,
+            "gap_pct":      position_gap_pct,
+            "current_rate": req.current_rate,
+            "median":       market_rates["median"],
+        },
+        "rate_ranges": rate_ranges,
+        "personal_positioning": {
+            "current_rate": req.current_rate,
+            "median":       market_rates["median"],
+            "gap_pct":      position_gap_pct,
+            "status":       position_indicator,
+        },
+        "market_demand": {
+            "level":       demand,
+            "explanation": ai_sections["demand_explanation"],
+        },
+        "competitor_density": {
+            "saturation":            saturation,
+            "specialization_pivots": ai_sections["specialization_pivots"],
+        },
+        "purchasing_power": {
+            "scenarios":     purchasing_power,
+            "col_reference": col_reference,
+            "live_rate":     live_rate,
+            "currency":      country_data["currency"],
+        },
+        "working_windows":   WORKING_WINDOWS,
+        "what_it_takes":     ai_sections["what_it_takes"],
+        "client_perspective": ai_sections["client_perspective"],
+        "market_timing": {
+            "signal":      timing_signal,
+            "explanation": ai_sections["timing_explanation"],
+        },
+        "action_layer":      ai_sections["action_layer"],
+        "positioning_brief": ai_sections["positioning_brief"],
+    }
+
+
+@app.get("/api/pulse/meta")
+def get_pulse_meta():
+    """
+    Returns the valid input options for the Pulse form.
+    No auth required — this is static reference data.
+    """
+    return {
+        "roles": [
+            {"key": key, "label": data["label"]}
+            for key, data in MARKET_DATA.items()
+        ],
+        "countries": [
+            {"key": key, "label": data["label"], "currency": data["currency"]}
+            for key, data in COUNTRY_DATA.items()
+        ],
+        "experience_brackets": VALID_EXP_BRACKETS,
+    }
+
+
+# ── Coach ─────────────────────────────────────────────────────────────────────
 
 class CoachRequest(BaseModel):
     message: str
@@ -349,9 +580,7 @@ def chat_with_coach(req: CoachRequest, user_id: int = Depends(get_current_user))
         context_str = "No data available."
     else:
         latest = snapshots[0]
-        context_str = (
-            f"Latest income: {latest['total_received_usd']} USD."
-        )
+        context_str = f"Latest income: {latest['total_received_usd']} USD."
 
     reply = coach.generate_coach_response(
         context_str,
