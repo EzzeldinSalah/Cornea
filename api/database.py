@@ -144,6 +144,34 @@ def init_db():
     )
     """)
 
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS income_sources (
+        id TEXT PRIMARY KEY,
+        platform TEXT,
+        name TEXT,
+        status TEXT,
+        last_sync TEXT,
+        user_id INTEGER,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS transactions (
+        id TEXT PRIMARY KEY,
+        date TEXT,
+        source TEXT,
+        client_description TEXT,
+        amount_usd REAL,
+        amount_local REAL,
+        platform_fee REAL,
+        net_received REAL,
+        user_id INTEGER,
+        committed BOOLEAN DEFAULT 0,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+    """)
+
     try:
         c.execute("ALTER TABLE user_settings ADD COLUMN avatar_blob BLOB")
     except sqlite3.OperationalError:
@@ -490,3 +518,145 @@ def get_coach_session_by_id(session_id: int, user_id: int):
     row = c.fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+# --- MERGE & TRANSACTIONS ---
+
+def get_income_sources(user_id: int):
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM income_sources WHERE user_id = ?", (user_id,))
+    rows = c.fetchall()
+    
+    # If no sources exist, create default ones
+    if not rows:
+        default_sources = [
+            ("upwork_1", "Upwork", "Upwork Global", "connected", datetime.now().isoformat()),
+            ("freelancer_1", "Freelancer", "Freelancer.com", "not connected", None),
+            ("mostaql_1", "Mostaql", "Mostaql Account", "connected", datetime.now().isoformat())
+        ]
+        for src_id, plat, name, status, last_sync in default_sources:
+            c.execute(
+                "INSERT INTO income_sources (id, platform, name, status, last_sync, user_id) VALUES (?, ?, ?, ?, ?, ?)",
+                (src_id, plat, name, status, last_sync, user_id)
+            )
+        conn.commit()
+        c.execute("SELECT * FROM income_sources WHERE user_id = ?", (user_id,))
+        rows = c.fetchall()
+        
+    conn.close()
+    return [dict(row) for row in rows]
+
+def add_manual_transaction(user_id: int, data: dict):
+    import uuid
+    conn = get_connection()
+    c = conn.cursor()
+    
+    tx_id = str(uuid.uuid4())
+    date = data.get("date", datetime.now().isoformat())
+    source = data.get("source_label", "Manual")
+    desc = data.get("description", "Manual Entry")
+    amt = float(data.get("amount", 0))
+    
+    # Simple fee deduction for manual (0%) or platforms
+    fee_pct = 0.0
+    if "Khamsat" in source or "Mostaql" in source:
+        fee_pct = 0.20
+        
+    fee = amt * fee_pct
+    net = amt - fee
+    local_amt = 0 # UI calculates local equivalent if 0
+    
+    c.execute("""
+    INSERT INTO transactions 
+    (id, date, source, client_description, amount_usd, amount_local, platform_fee, net_received, user_id, committed)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    """, (tx_id, date, source, desc, amt, local_amt, fee, net, user_id))
+    
+    conn.commit()
+    conn.close()
+    return tx_id
+
+def get_uncommitted_transactions(user_id: int):
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM transactions WHERE user_id = ? AND committed = 0 ORDER BY date DESC", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+def commit_transactions_to_snapshot(user_id: int):
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    c.execute("SELECT * FROM transactions WHERE user_id = ? AND committed = 0", (user_id,))
+    uncommitted = c.fetchall()
+    
+    if not uncommitted:
+        conn.close()
+        return False
+        
+    total_invoiced = sum(row["amount_usd"] for row in uncommitted)
+    total_fees = sum(row["platform_fee"] for row in uncommitted)
+    total_received = sum(row["net_received"] for row in uncommitted)
+    
+    clients = []
+    for row in uncommitted:
+        clients.append({
+            "name": row["client_description"],
+            "billed": row["amount_usd"],
+            "effective_rate": 0, # Placeholder
+            "payment_wait_days": 0, # Placeholder
+        })
+        
+    date_str = datetime.now().isoformat()
+    
+    c.execute("""
+    INSERT INTO snapshots (
+        created_at, upwork_sync_date, total_invoiced_usd, total_fees_usd, 
+        total_received_usd, clients_json, user_id, source, platform_transaction_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (date_str, date_str, total_invoiced, total_fees, total_received, json.dumps(clients), user_id, "merged", f"merge-{date_str}"))
+    
+    c.execute("UPDATE transactions SET committed = 1 WHERE user_id = ? AND committed = 0", (user_id,))
+    
+    conn.commit()
+    conn.close()
+    return True
+
+def sync_source_mock(source_id: str, user_id: int):
+    import uuid
+    import random
+    conn = get_connection()
+    c = conn.cursor()
+    
+    c.execute("SELECT platform, name FROM income_sources WHERE id = ? AND user_id = ?", (source_id, user_id))
+    src = c.fetchone()
+    if not src:
+        conn.close()
+        return False
+        
+    platform, name = src
+    date_str = datetime.now().isoformat()
+    
+    # Generate 1-3 random transactions
+    for _ in range(random.randint(1, 3)):
+        tx_id = str(uuid.uuid4())
+        amt = random.randint(100, 1000)
+        fee = amt * 0.10
+        net = amt - fee
+        desc = f"Client Project {random.randint(100, 999)}"
+        c.execute("""
+        INSERT INTO transactions 
+        (id, date, source, client_description, amount_usd, amount_local, platform_fee, net_received, user_id, committed)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        """, (tx_id, date_str, platform, desc, amt, 0, fee, net, user_id))
+        
+    c.execute("UPDATE income_sources SET last_sync = ? WHERE id = ? AND user_id = ?", (date_str, source_id, user_id))
+    
+    conn.commit()
+    conn.close()
+    return True

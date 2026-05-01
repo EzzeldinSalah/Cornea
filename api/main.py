@@ -258,6 +258,69 @@ def get_blame_api(user_id: int = Depends(get_current_user)):
     return get_blame(user_id)
 
 
+# --- MERGE APIs ---
+
+@app.get("/api/sources")
+def get_sources_api(user_id: int = Depends(get_current_user)):
+    return database.get_income_sources(user_id)
+
+@app.post("/api/sources/{source_id}/sync")
+def sync_source_api(source_id: str, user_id: int = Depends(get_current_user)):
+    success = database.sync_source_mock(source_id, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return {"status": "success"}
+
+class ManualTransaction(BaseModel):
+    description: str
+    amount: float
+    currency: str = "USD"
+    date: str
+    source_label: str
+
+@app.post("/api/transactions/manual")
+def add_manual_transaction_api(req: ManualTransaction, user_id: int = Depends(get_current_user)):
+    database.add_manual_transaction(user_id, req.model_dump())
+    return {"status": "success"}
+
+@app.get("/api/merge/timeline")
+def get_merge_timeline_api(user_id: int = Depends(get_current_user)):
+    return database.get_uncommitted_transactions(user_id)
+
+@app.get("/api/merge/reconciliation")
+def get_merge_reconciliation_api(user_id: int = Depends(get_current_user)):
+    uncommitted = database.get_uncommitted_transactions(user_id)
+    total_usd = sum(t["amount_usd"] for t in uncommitted)
+    total_fees = sum(t["platform_fee"] for t in uncommitted)
+    total_local = sum(t["amount_local"] for t in uncommitted)
+    
+    kept_pct = 0
+    if total_usd > 0:
+        kept_pct = ((total_usd - total_fees) / total_usd) * 100
+        
+    sources_dict = {}
+    for t in uncommitted:
+        sources_dict[t["source"]] = sources_dict.get(t["source"], 0) + t["amount_usd"]
+        
+    sources_list = [{"name": k, "contribution_usd": v} for k, v in sources_dict.items()]
+    
+    return {
+        "total_usd": total_usd,
+        "total_local": total_local,
+        "total_fees": total_fees,
+        "kept_percentage": kept_pct,
+        "sources": sources_list
+    }
+
+@app.post("/api/merge/commit")
+def commit_merge_api(user_id: int = Depends(get_current_user)):
+    success = database.commit_transactions_to_snapshot(user_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="No unmerged transactions to commit.")
+    return {"status": "success"}
+
+# --- COACH APIs ---
+
 class CoachRequest(BaseModel):
     message: str
     session_id: str

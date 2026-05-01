@@ -189,7 +189,7 @@
 			</p>
 			<div class="hero-actions center">
 				<NeoButton href={appHref}>Start Syncing</NeoButton>
-				<NeoButton variant="secondary" href="https://github.com/EzzeldinSalah"
+				<NeoButton variant="secondary" target="_blank" href="https://github.com/EzzeldinSalah/Cornea"
 					>Explore System</NeoButton
 				>
 			</div>

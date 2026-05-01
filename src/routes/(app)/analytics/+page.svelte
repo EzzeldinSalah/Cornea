@@ -92,7 +92,6 @@
 
 	const periods = [
 		{ id: '30d', label: 'Last 30 days' },
-		{ id: 'this_month', label: 'This month' },
 		{ id: '3m', label: 'Last 3 months' },
 		{ id: 'this_quarter', label: 'This quarter' },
 		{ id: '6m', label: 'Last 6 months' },

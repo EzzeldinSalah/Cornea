@@ -8,6 +8,7 @@
 	import analyticsIcon from '$lib/assets/analytics.svg';
 	import coachIcon from '$lib/assets/coach.png';
 	import settingIcon from '$lib/assets/setting.png';
+	import mergeIcon from '$lib/assets/merge.svg';
 </script>
 
 <aside class="sidebar">
@@ -29,6 +30,9 @@
 		<a href={resolve('/analytics')} class:active={page.url.pathname.includes('/analytics')}>
 			<img class="icon" src={analyticsIcon} alt="Analytics" /> <span class="text">Analytics</span>
 		</a>
+		<a href={resolve('/merge')} class:active={page.url.pathname.includes('/merge')}>
+			<img class="icon" src={mergeIcon} alt="Merge" /> <span class="text">Merge</span>
+		</a>
 		<a href={resolve('/coach')} class:active={page.url.pathname.includes('/coach')}>
 			<img class="icon" src={coachIcon} alt="Coach" /> <span class="text">Coach</span>
 		</a>
@@ -41,9 +45,6 @@
 
 		<div class="disabled-link" aria-disabled="true">
 			<span class="icon emoji">🌿</span> <span class="text">Branch</span>
-		</div>
-		<div class="disabled-link" aria-disabled="true">
-			<span class="icon emoji">🔀</span> <span class="text">Merge</span>
 		</div>
 	</nav>
 

@@ -190,9 +190,8 @@
 		<p class="loading">Loading settings...</p>
 	{:else}
 		<div class="settings-grid">
-			<!-- Profile Section -->
 			<section class="settings-card">
-				<h2>👤 Profile</h2>
+				<h2>Profile</h2>
 				<div class="form-group">
 					<div class="field-label">Avatar</div>
 					<div class="avatar-preview">
@@ -240,9 +239,8 @@
 				</div>
 			</section>
 
-			<!-- Financial Settings -->
 			<section class="settings-card">
-				<h2>💰 Financial Settings</h2>
+				<h2>Financial Settings</h2>
 				<div class="form-group">
 					<label for="primary-currency">Primary Currency</label>
 					<select id="primary-currency" bind:value={settings.primary_currency}>
@@ -279,9 +277,8 @@
 				</div>
 			</section>
 
-			<!-- Coach Settings -->
 			<section class="settings-card">
-				<h2>🤖 Coach Settings</h2>
+				<h2>Coach Settings</h2>
 				<div class="form-group">
 					<label for="coach-lang">Coach Language</label>
 					<select id="coach-lang" bind:value={settings.coach_language}>
@@ -300,9 +297,8 @@
 				</div>
 			</section>
 
-			<!-- Notifications -->
 			<section class="settings-card">
-				<h2>🔔 Notifications <span class="badge dev">Under Dev</span></h2>
+				<h2>Notifications <span class="badge dev">Under Dev</span></h2>
 				<div class="form-group checkbox-group">
 					<label class="toggle-label">
 						<input type="checkbox" bind:checked={settings.notify_weekly_digest} />
@@ -333,9 +329,8 @@
 				</div>
 			</section>
 
-			<!-- Security -->
 			<section class="settings-card">
-				<h2>🔒 Security</h2>
+				<h2>Security</h2>
 				<div class="form-group">
 					<label for="old-pw">Current Password</label>
 					<input type="password" id="old-pw" bind:value={oldPassword} placeholder="••••••••" />
@@ -347,9 +342,8 @@
 				<NeoButton onclick={changePassword}>Change Password</NeoButton>
 			</section>
 
-			<!-- Danger Zone -->
-			<section class="settings-card danger-card">
-				<h2>🧪 Danger Zone</h2>
+			<section class="settings-card">
+				<h2>Danger Zone</h2>
 
 				<NeoButton variant="secondary" onclick={exportData}>Export All Data as JSON</NeoButton>
 
