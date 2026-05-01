@@ -293,9 +293,9 @@
 								<span class="source-name" style="color: {getSourceColor(source.platform)};">
 									{source.name}
 								</span>
-								<span class="badge {source.status.replace(' ', '-')}">{source.status}</span>
 							</div>
 							<div class="source-actions">
+								<span class="badge {source.status.replace(' ', '-')}">{source.status}</span>
 								{#if source.status === 'connected'}
 									<NeoButton onclick={() => syncSource(source.id)} class="btn-sm">Sync</NeoButton>
 								{/if}
@@ -480,6 +480,13 @@
 		font-weight: 800;
 		font-size: 0.95rem;
 		text-transform: uppercase;
+		line-height: 1.2;
+	}
+
+	.source-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
 	}
 
 	.badge {
