@@ -70,25 +70,69 @@ def currency_exchange_converter(base_currency: str, target_currency: str):
     EXCHANGE_RATE_CACHE[cache_key] = {"rate": rate, "timestamp": now}
     return rate
 
-def get_diff(user_id: int):
+def get_diff(user_id: int, base_id: int = None, compare_id: int = None):
     snapshots = database.get_snapshots(user_id)
     if not snapshots or len(snapshots) < 2:
-        return None
+        return {"error": "Need at least two snapshots to compute a diff."}
 
-    now = snapshots[0]
-    past = snapshots[1]
+    base_snap = None
+    compare_snap = None
 
-    # Compute difference purely in USD. Frontend will convert.
-    diff_invoiced_usd = now["total_invoiced_usd"] - past["total_invoiced_usd"]
-    diff_fees_usd = now["total_fees_usd"] - past["total_fees_usd"]
-    diff_received_usd = now["total_received_usd"] - past["total_received_usd"]
+    if base_id is not None and compare_id is not None:
+        base_snap = next((s for s in snapshots if s["id"] == base_id), None)
+        compare_snap = next((s for s in snapshots if s["id"] == compare_id), None)
+    
+    if not base_snap or not compare_snap:
+        base_snap = snapshots[1]
+        compare_snap = snapshots[0]
+
+    def process_snapshot(snap):
+        clients = []
+        if snap.get("clients_json"):
+            try:
+                raw_clients = json.loads(snap["clients_json"])
+                for c in raw_clients:
+                    clients.append({
+                        "name": c.get("name", "Unknown"),
+                        "billed": float(c.get("billed", 0)),
+                        "effective_rate": float(c.get("effective_rate", 0)),
+                        "wait_days": float(c.get("payment_wait_days", 0))
+                    })
+            except:
+                pass
+        
+        avg_wait = sum(c["wait_days"] for c in clients) / len(clients) if clients else 0.0
+        total_billed = sum(c["billed"] for c in clients)
+        eff_rate = sum(c["effective_rate"] * c["billed"] for c in clients) / total_billed if total_billed > 0 else 0.0
+
+        return {
+            "id": snap["id"],
+            "date": snap["created_at"],
+            "source": snap.get("source", "Unknown"),
+            "invoiced_usd": float(snap["total_invoiced_usd"]),
+            "fees_usd": float(snap["total_fees_usd"]),
+            "received_usd": float(snap["total_received_usd"]),
+            "effective_rate": round(eff_rate, 2),
+            "avg_payment_wait": round(avg_wait, 1),
+            "clients": clients
+        }
+
+    base = process_snapshot(base_snap)
+    compare = process_snapshot(compare_snap)
+
+    delta = {
+        "invoiced_usd": round(compare["invoiced_usd"] - base["invoiced_usd"], 2),
+        "fees_usd": round(compare["fees_usd"] - base["fees_usd"], 2),
+        "received_usd": round(compare["received_usd"] - base["received_usd"], 2),
+        "effective_rate": round(compare["effective_rate"] - base["effective_rate"], 2),
+        "avg_payment_wait": round(compare["avg_payment_wait"] - base["avg_payment_wait"], 1),
+        "client_count": len(compare["clients"]) - len(base["clients"]),
+    }
 
     return {
-        "diff_invoiced_usd": round(diff_invoiced_usd, 2),
-        "diff_fees_usd": round(diff_fees_usd, 2),
-        "diff_received_usd": round(diff_received_usd, 2),
-        "now_received_usd": round(now["total_received_usd"], 2),
-        "past_received_usd": round(past["total_received_usd"], 2),
+        "base": base,
+        "compare": compare,
+        "delta": delta
     }
 
 def get_blame(user_id: int):

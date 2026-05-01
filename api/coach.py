@@ -100,3 +100,33 @@ def get_formatted_history(session_id: str):
         elif msg.type == "ai":
             formatted.append({"role": "assistant", "text": str(text)})
     return formatted
+
+def generate_diff_insight(diff_data: dict, user_id=None):
+    system_prompt = """You are Cornea, a brutal, highly analytical financial coach for a freelancer.
+    
+You are analyzing a financial DIFF between two snapshots in time. 
+The user provides a JSON payload with 'base' (older), 'compare' (newer), and 'delta' (changes).
+Write a SINGLE PARAGRAPH of brutal, honest analysis summarizing how their business changed. 
+Focus heavily on the Delta (did they make more money but work harder? Are fees eating their profit?). 
+Output ONLY that paragraph, no intro, no bullet points.
+"""
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("human", "Here is the financial diff: {input}"),
+    ])
+    
+    # Simple chain without history or tools for this specific ad-hoc task
+    chain = prompt | llm
+    
+    try:
+        set_active_user_id(user_id)
+        response = chain.invoke({"input": json.dumps(diff_data, indent=2)})
+        content = response.content
+        if isinstance(content, list) and content and isinstance(content[0], dict):
+            return content[0].get("text", str(content))
+        return str(content)
+    except Exception as e:
+        return f"Coach unavailable — read the numbers yourself. (Error: {e})"
+    finally:
+        set_active_user_id(None)

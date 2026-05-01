@@ -27,6 +27,8 @@ __pycache__/
 
 # Database
 cornea.db
+cornea.db-wal
+cornea.db-shm
 
 # Vite
 vite.config.js.timestamp-*

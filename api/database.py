@@ -40,7 +40,9 @@ OBSOLETE_SNAPSHOT_COLUMNS = {
 
 
 def get_connection():
-    return sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=15.0)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    return conn
 
 
 def migrate_snapshots_to_usd_only(cursor):

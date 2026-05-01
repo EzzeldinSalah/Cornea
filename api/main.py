@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 import time
 import jwt
-from fastapi import FastAPI, HTTPException, Depends, File, UploadFile, Response
+from fastapi import FastAPI, HTTPException, Depends, File, UploadFile, Response, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -249,8 +249,14 @@ def get_log(user_id: int = Depends(get_current_user)):
 
 
 @app.get("/api/diff")
-def get_diff_api(user_id: int = Depends(get_current_user)):
-    return get_diff(user_id)
+def get_diff_api(base: int = Query(None), compare: int = Query(None), user_id: int = Depends(get_current_user)):
+    return get_diff(user_id, base, compare)
+
+@app.post("/api/diff/insight")
+def get_diff_insight_api(diff_data: dict, user_id: int = Depends(get_current_user)):
+    from coach import generate_diff_insight
+    insight = generate_diff_insight(diff_data, user_id)
+    return {"insight": insight}
 
 
 @app.get("/api/blame")
