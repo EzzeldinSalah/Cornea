@@ -9,6 +9,7 @@
 	import coachIcon from '$lib/assets/coach.png';
 	import settingIcon from '$lib/assets/setting.png';
 	import mergeIcon from '$lib/assets/merge.svg';
+	import trendsIcon from '$lib/assets/trends.svg';
 </script>
 
 <aside class="sidebar">
@@ -33,6 +34,9 @@
 		<a href={resolve('/merge')} class:active={page.url.pathname.includes('/merge')}>
 			<img class="icon" src={mergeIcon} alt="Merge" /> <span class="text">Merge</span>
 		</a>
+		<a href={resolve('/trends')} class:active={page.url.pathname.includes('/trends')}>
+			<img class="icon" src={trendsIcon} alt="trends" /> <span class="text">Trends</span>
+		</a>
 		<a href={resolve('/coach')} class:active={page.url.pathname.includes('/coach')}>
 			<img class="icon" src={coachIcon} alt="Coach" /> <span class="text">Coach</span>
 		</a>
@@ -40,12 +44,6 @@
 			<img class="icon" src={settingIcon} alt="Settings" /> <span class="text">Settings</span>
 		</a>
 
-		<div class="divider"></div>
-		<p class="section-label">Coming Soon</p>
-
-		<div class="disabled-link" aria-disabled="true">
-			<span class="icon emoji">🌿</span> <span class="text">Branch</span>
-		</div>
 	</nav>
 
 	<div class="footer">
@@ -94,8 +92,7 @@
 		flex: 1;
 	}
 
-	.nav-links a,
-	.nav-links .disabled-link {
+	.nav-links a{
 		display: flex;
 		align-items: center;
 		gap: 1rem;
