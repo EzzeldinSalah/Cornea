@@ -17,8 +17,8 @@
 			const settings = await settingsRes.json();
 			const currency = settings.primary_currency || 'USD';
 			await loadExchangeRate(currency, token);
-		} catch (e) {
-			console.error('Failed to initialize exchange store', e);
+		} catch {
+			await loadExchangeRate('USD');
 		}
 	});
 </script>

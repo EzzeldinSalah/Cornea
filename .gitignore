@@ -1,6 +1,5 @@
 node_modules
 
-# Output
 .output
 .vercel
 .netlify
@@ -8,28 +7,24 @@ node_modules
 /.svelte-kit
 /build
 
-# OS
 .DS_Store
 Thumbs.db
 
-# Env
 .env
 .env.*
 !.env.example
 !.env.test
 
-# Python
 venv/
 api/venv/
+api/.venv/
 __pycache__/
 *.py[cod]
 *$py.class
 
-# Database
 cornea.db
 cornea.db-wal
 cornea.db-shm
 
-# Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*

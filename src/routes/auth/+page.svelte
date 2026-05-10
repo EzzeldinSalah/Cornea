@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import NeoButton from '$lib/components/ui/NeoButton.svelte';
 	import { PUBLIC_GOOGLE_CLIENT_ID } from '$env/static/public';
 
@@ -55,7 +56,6 @@
 	});
 
 	$effect(() => {
-		isLogin;
 		renderGoogleButton();
 	});
 
@@ -69,17 +69,17 @@
 			const data = await res.json();
 			if (res.ok && data.token) {
 				localStorage.setItem('cornea_token', data.token);
-				void goto('/log');
+				void goto(resolve('/log'));
 			} else {
 				alert(data.detail || 'Google auth failed');
 			}
-		} catch (e) {
+		} catch {
 			alert('Error with Google login');
 		}
 	}
 
-	async function handleManualAuth(e: SubmitEvent) {
-		e.preventDefault();
+	async function handleManualAuth(event: SubmitEvent) {
+		event.preventDefault();
 		const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
 		try {
 			const res = await fetch(endpoint, {
@@ -90,11 +90,11 @@
 			const data = await res.json();
 			if (res.ok && data.token) {
 				localStorage.setItem('cornea_token', data.token);
-				void goto('/log');
+				void goto(resolve('/log'));
 			} else {
 				alert(data.detail || 'Authentication failed');
 			}
-		} catch (e) {
+		} catch {
 			alert('Error authenticating');
 		}
 	}

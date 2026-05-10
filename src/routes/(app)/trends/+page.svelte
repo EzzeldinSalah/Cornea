@@ -2,23 +2,91 @@
 	import { onMount } from 'svelte';
 	import NeoButton from '$lib/components/ui/NeoButton.svelte';
 
-	// --- Form state ---
-	let roles = $state([]);
-	let countries = $state([]);
-	let expBrackets = $state([]);
+	type PulseOption = {
+		key: string;
+		label: string;
+		currency?: string;
+	};
+
+	type RateRange = {
+		usd: number;
+		local: number | null;
+	};
+
+	type PurchasingPowerScenario = {
+		label: string;
+		floor_usd: number;
+		median_usd: number;
+		target_usd: number;
+		floor_local: number | null;
+		median_local: number | null;
+		target_local: number | null;
+	};
+
+	type PulseReport = {
+		inputs: {
+			job_title_label: string;
+			country_label: string;
+			currency: string;
+		};
+		position_indicator: {
+			status: string | null;
+			current_rate: number | null;
+			median: number;
+			gap_pct: number | null;
+		};
+		rate_ranges: {
+			floor: RateRange;
+			median: RateRange;
+			target: RateRange;
+		};
+		market_demand: {
+			level: string;
+			explanation: string;
+		};
+		competitor_density: {
+			saturation: string;
+			specialization_pivots: string;
+		};
+		purchasing_power: {
+			scenarios: Record<string, PurchasingPowerScenario>;
+			col_reference: {
+				label: string;
+				amount_usd: number;
+				amount_local: number | null;
+			};
+			live_rate: number | null;
+			currency: string;
+		};
+		working_windows: {
+			market: string;
+			egypt_local: string;
+			note: string;
+		}[];
+		what_it_takes: string;
+		client_perspective: string;
+		market_timing: {
+			signal: string;
+			explanation: string;
+		};
+		action_layer: string;
+		positioning_brief: string;
+	};
+
+	let roles = $state<PulseOption[]>([]);
+	let countries = $state<PulseOption[]>([]);
+	let expBrackets = $state<string[]>([]);
 
 	let selectedRole = $state('');
 	let selectedExp = $state('');
 	let selectedCountry = $state('egypt');
 	let currentRate = $state('');
 
-	// --- Report state ---
-	let report = $state(null);
+	let report = $state<PulseReport | null>(null);
 	let loading = $state(false);
 	let metaLoading = $state(true);
 	let error = $state('');
 
-	// --- Load dropdown options from /api/pulse/meta on mount ---
 	onMount(async () => {
 		try {
 			const res = await fetch('/api/pulse/meta');
@@ -27,10 +95,9 @@
 			countries = data.countries || [];
 			expBrackets = data.experience_brackets || [];
 
-			// Pre-select first role and first bracket so form is never blank
 			if (roles.length) selectedRole = roles[0].key;
 			if (expBrackets.length) selectedExp = expBrackets[0];
-		} catch (e) {
+		} catch {
 			error = 'Failed to load options. Is the backend running?';
 		} finally {
 			metaLoading = false;
@@ -44,7 +111,7 @@
 		report = null;
 
 		try {
-			const token = localStorage.getItem('token');
+			const token = localStorage.getItem('cornea_token');
 			const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 			if (token) headers['Authorization'] = `Bearer ${token}`;
 
@@ -66,22 +133,20 @@
 				throw new Error(err.detail || 'Request failed');
 			}
 
-			report = await res.json();
-		} catch (e: any) {
-			error = e.message || 'Something went wrong.';
+			report = (await res.json()) as PulseReport;
+		} catch (caughtError) {
+			error = caughtError instanceof Error ? caughtError.message : 'Something went wrong.';
 		} finally {
 			loading = false;
 		}
 	}
 
-	// Position indicator colours
 	function positionColour(status: string | null) {
 		if (status === 'Underpriced') return 'var(--theme-danger, #e53e3e)';
 		if (status === 'Premium') return 'var(--theme-success, #38a169)';
 		return 'var(--theme-accent)';
 	}
 
-	// Timing signal colours
 	function timingColour(signal: string) {
 		if (signal === 'Act Now') return 'var(--theme-success, #38a169)';
 		if (signal === 'Caution') return 'var(--theme-danger, #e53e3e)';
@@ -92,19 +157,22 @@
 		if (n === null || n === undefined) return '—';
 		return n.toLocaleString(undefined, { maximumFractionDigits: decimals });
 	}
+
+	function formatGap(value: number | null) {
+		if (value === null) return '0';
+		return `${value > 0 ? '+' : ''}${value}`;
+	}
 </script>
 
 <svelte:head>
 	<title>Pulse | Cornea</title>
 </svelte:head>
 
-<!-- ── Page Header ── -->
 <div class="page-header">
 	<h1>pulse</h1>
 	<p class="subtitle">Where do you stand in the market — right now?</p>
 </div>
 
-<!-- ── Input Form ── -->
 <div class="form-card">
 	{#if metaLoading}
 		<p class="loading">Loading options...</p>
@@ -113,7 +181,7 @@
 			<div class="field">
 				<label for="role">Job Title</label>
 				<select id="role" bind:value={selectedRole}>
-					{#each roles as r}
+					{#each roles as r (r.key)}
 						<option value={r.key}>{r.label}</option>
 					{/each}
 				</select>
@@ -122,7 +190,7 @@
 			<div class="field">
 				<label for="exp">Years of Experience</label>
 				<select id="exp" bind:value={selectedExp}>
-					{#each expBrackets as b}
+					{#each expBrackets as b (b)}
 						<option value={b}>{b} years</option>
 					{/each}
 				</select>
@@ -131,7 +199,7 @@
 			<div class="field">
 				<label for="country">Country</label>
 				<select id="country" bind:value={selectedCountry}>
-					{#each countries as c}
+					{#each countries as c (c.key)}
 						<option value={c.key}>{c.label}</option>
 					{/each}
 				</select>
@@ -155,19 +223,16 @@
 	{/if}
 </div>
 
-<!-- ── Loading skeleton ── -->
 {#if loading}
 	<div class="skeleton-grid">
-		{#each [1, 2, 3, 4] as _}
+		{#each [1, 2, 3, 4] as skeletonNumber (skeletonNumber)}
 			<div class="skeleton-card"></div>
 		{/each}
 	</div>
 {/if}
 
-<!-- ── Report ── -->
 {#if report && !loading}
 	<div class="report">
-		<!-- 1. Position Indicator -->
 		{#if report.position_indicator.status}
 			<div class="report-card position-card">
 				<span class="card-label">Your Position</span>
@@ -186,12 +251,11 @@
 					<strong>{report.inputs.job_title_label}</strong>
 					at your level is
 					<strong>${report.position_indicator.median}/hr</strong>
-					({report.position_indicator.gap_pct > 0 ? '+' : ''}{report.position_indicator.gap_pct}%).
+					({formatGap(report.position_indicator.gap_pct)}%).
 				</p>
 			</div>
 		{/if}
 
-		<!-- 2. Rate Ranges -->
 		<div class="report-card">
 			<span class="card-label">Suggested Rate Range</span>
 			<div class="rate-row">
@@ -228,7 +292,6 @@
 			</div>
 		</div>
 
-		<!-- 3. Market Demand + Competitor Density (side by side on wide screens) -->
 		<div class="two-col">
 			<div class="report-card">
 				<span class="card-label">Market Demand</span>
@@ -247,7 +310,6 @@
 			</div>
 		</div>
 
-		<!-- 4. Purchasing Power -->
 		<div class="report-card">
 			<span class="card-label">
 				Purchasing Power in {report.inputs.country_label}
@@ -270,7 +332,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each Object.values(report.purchasing_power.scenarios) as row}
+						{#each Object.values(report.purchasing_power.scenarios) as row (row.label)}
 							<tr>
 								<td class="workload-label">{row.label}</td>
 								<td>
@@ -314,7 +376,6 @@
 			</p>
 		</div>
 
-		<!-- 5. Market Timing -->
 		<div class="report-card timing-card">
 			<span class="card-label">Market Timing</span>
 			<span
@@ -328,7 +389,6 @@
 			<p class="ai-text">{report.market_timing.explanation}</p>
 		</div>
 
-		<!-- 6. Working Windows (static, always shown) -->
 		<div class="report-card">
 			<span class="card-label">Best Hours to Be Online</span>
 			<p class="windows-note">
@@ -336,7 +396,7 @@
 				are actively hiring.
 			</p>
 			<div class="windows-grid">
-				{#each report.working_windows as w}
+				{#each report.working_windows as w (w.market)}
 					<div class="window-item">
 						<span class="window-market">{w.market}</span>
 						<span class="window-local">{w.egypt_local}</span>
@@ -346,25 +406,21 @@
 			</div>
 		</div>
 
-		<!-- 7. What It Takes -->
 		<div class="report-card">
 			<span class="card-label">What It Takes to Get There</span>
 			<p class="ai-text">{report.what_it_takes}</p>
 		</div>
 
-		<!-- 8. Client Perspective -->
 		<div class="report-card">
 			<span class="card-label">How Clients Read Your Rate</span>
 			<p class="ai-text">{report.client_perspective}</p>
 		</div>
 
-		<!-- 9. Positioning Brief -->
 		<div class="report-card brief-card">
 			<span class="card-label">Positioning Brief</span>
 			<p class="brief-text">{report.positioning_brief}</p>
 		</div>
 
-		<!-- 10. Action Layer -->
 		<div class="report-card action-card">
 			<span class="card-label">What To Do Next</span>
 			<p class="ai-text action-text">{report.action_layer}</p>
@@ -373,7 +429,6 @@
 {/if}
 
 <style>
-	/* ── Page Header ── */
 	.page-header {
 		margin-bottom: 3rem;
 	}
@@ -388,7 +443,6 @@
 		margin-top: 0.5rem;
 	}
 
-	/* ── Form Card ── */
 	.form-card {
 		border: 3px solid var(--theme-line);
 		background: var(--theme-paper);
@@ -452,7 +506,6 @@
 		color: var(--theme-muted);
 	}
 
-	/* ── Skeleton ── */
 	.skeleton-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
@@ -482,14 +535,12 @@
 		}
 	}
 
-	/* ── Report ── */
 	.report {
 		display: flex;
 		flex-direction: column;
 		gap: 1.25rem;
 	}
 
-	/* Base card — matches commit-card from reference */
 	.report-card {
 		border: 3px solid var(--theme-line);
 		background: var(--theme-paper);
@@ -513,7 +564,6 @@
 		flex-wrap: wrap;
 	}
 
-	/* ── Position Card ── */
 	.position-badge {
 		display: inline-block;
 		border: 3px solid;
@@ -529,7 +579,6 @@
 		line-height: 1.6;
 	}
 
-	/* ── Rate Ranges ── */
 	.rate-row {
 		display: grid;
 		grid-template-columns: 1fr 1fr 1fr;
@@ -573,7 +622,6 @@
 		color: var(--theme-muted);
 	}
 
-	/* ── Two-col layout ── */
 	.two-col {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
@@ -585,7 +633,6 @@
 		}
 	}
 
-	/* ── Signal Badges ── */
 	.signal-badge {
 		display: inline-block;
 		border: 2px solid var(--theme-line);
@@ -624,7 +671,6 @@
 		color: var(--theme-success, #38a169);
 	}
 
-	/* ── AI text ── */
 	.ai-text {
 		margin: 0;
 		font-size: 1rem;
@@ -632,7 +678,6 @@
 		white-space: pre-line;
 	}
 
-	/* ── Purchasing Power Table ── */
 	.rate-note {
 		font-weight: normal;
 		font-size: 0.8rem;
@@ -683,7 +728,6 @@
 		padding-top: 0.75rem;
 	}
 
-	/* ── Timing Card ── */
 	.timing-badge {
 		display: inline-block;
 		border: 3px solid;
@@ -694,7 +738,6 @@
 		width: fit-content;
 	}
 
-	/* ── Working Windows ── */
 	.windows-note {
 		margin: 0;
 		font-size: 0.9rem;
@@ -734,7 +777,6 @@
 		line-height: 1.4;
 	}
 
-	/* ── Brief Card ── */
 	.brief-card {
 		border-color: var(--theme-accent);
 		box-shadow: 8px 8px 0 var(--theme-shadow);
@@ -746,7 +788,6 @@
 		font-style: italic;
 	}
 
-	/* ── Action Card ── */
 	.action-card {
 		background: color-mix(in srgb, var(--theme-accent) 6%, var(--theme-paper));
 	}

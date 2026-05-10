@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import NeoCard from '$lib/components/ui/NeoCard.svelte';
 	import { primaryCurrency, toLocal } from '$lib/stores/exchange';
 
@@ -121,7 +122,7 @@
 	async function loadAnalytics(period = selectedPeriod) {
 		const token = getToken();
 		if (!token) {
-			void goto('/auth');
+			void goto(resolve('/auth'));
 			return;
 		}
 
@@ -133,7 +134,7 @@
 			});
 			if (res.status === 401) {
 				localStorage.removeItem('cornea_token');
-				void goto('/auth');
+				void goto(resolve('/auth'));
 				return;
 			}
 			if (!res.ok) {
@@ -147,9 +148,8 @@
 				...fetched,
 				fee_breakdown: { ...data.fee_breakdown, ...fetched.fee_breakdown }
 			};
-		} catch (e) {
-			console.error('Failed to load analytics', e);
-			error = e instanceof Error ? e.message : 'Failed to load analytics.';
+		} catch (caughtError) {
+			error = caughtError instanceof Error ? caughtError.message : 'Failed to load analytics.';
 		} finally {
 			loading = false;
 		}
@@ -221,7 +221,7 @@
 				value={selectedView}
 				onchange={handleViewChange}
 			>
-				{#each views as v}
+				{#each views as v (v.id)}
 					<option value={v.id}>{v.label}</option>
 				{/each}
 			</select>
@@ -237,7 +237,7 @@
 					onchange={handlePeriodChange}
 					disabled={loading}
 				>
-					{#each periods as p}
+					{#each periods as p (p.id)}
 						<option value={p.id}>{p.label}</option>
 					{/each}
 				</select>
@@ -283,9 +283,8 @@
 				<h3>The Reality Check</h3>
 				<p class="chart-desc">What you invoiced vs what you actually received in local currency.</p>
 				<div class="bar-chart-mirrored">
-					{#each data.monthly as m}
+					{#each data.monthly as m (m.month_key || m.month)}
 						<div class="bar-col">
-							<!-- Normalize USD and Local so both are visible -->
 							<div class="bar-group">
 								<div
 									class="bar bar-usd"
@@ -346,7 +345,7 @@
 							</tr>
 						</thead>
 						<tbody>
-							{#each data.clients as c}
+							{#each data.clients as c (c.name)}
 								<tr>
 									<td><strong>{c.name}</strong></td>
 									<td>{formatUsd(c.total_usd)}</td>
@@ -393,7 +392,7 @@
 				<h3>Payment Timeline</h3>
 				<p class="chart-desc">A Gantt-like view of client payments.</p>
 				<div class="timeline-lanes">
-					{#each data.clients as c, i}
+					{#each data.clients as c, i (c.name)}
 						<div class="timeline-lane">
 							<span class="lane-label">{c.name}</span>
 							<div class="lane-track">
@@ -435,7 +434,7 @@
 				<h3>Forecast</h3>
 				<p class="chart-desc">Projecting next 3 months based on historical pattern.</p>
 				<div class="bar-chart-mirrored">
-					{#each data.forecast as f}
+					{#each data.forecast as f (f.month)}
 						<div class="bar-col">
 							<div class="bar-group">
 								<div
@@ -596,7 +595,6 @@
 		}
 	}
 
-	/* Common Chart Layout */
 	.chart-wrapper {
 		display: flex;
 		flex-direction: column;
@@ -619,7 +617,6 @@
 		text-align: center;
 	}
 
-	/* Bar Chart Mirrored/Grouped */
 	.bar-chart-mirrored {
 		display: flex;
 		align-items: flex-end;
@@ -687,7 +684,6 @@
 		text-transform: uppercase;
 	}
 
-	/* Legend */
 	.legend {
 		display: flex;
 		gap: 1.5rem;
@@ -715,7 +711,6 @@
 		border-style: dashed;
 	}
 
-	/* Stacked Bar */
 	.stacked-bar-container {
 		width: 100%;
 		max-width: 700px;
@@ -760,7 +755,6 @@
 		font-size: 1.25rem;
 	}
 
-	/* Table */
 	.table-responsive {
 		width: 100%;
 		overflow-x: auto;
@@ -807,7 +801,6 @@
 		border-color: #cc0000;
 	}
 
-	/* Line chart SVG */
 	.line-chart {
 		width: 100%;
 		height: 250px;
@@ -821,7 +814,6 @@
 		height: 100%;
 	}
 
-	/* Datagrid lanes */
 	.timeline-lanes {
 		width: 100%;
 		display: flex;
@@ -863,7 +855,7 @@
 	.time-block.yellow {
 		background: #ffeebb;
 	}
-	/* Best vs worst */
+
 	.comparison-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;

@@ -1,6 +1,5 @@
 import os
 import json
-import sqlite3
 from datetime import datetime, timedelta, timezone
 import time
 import jwt
@@ -22,11 +21,12 @@ from utils.functions import get_diff, get_blame, currency_exchange_converter
 
 app = FastAPI(title="Cornea API")
 
-JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-key-for-dev")
+JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-key-for-dev-only-change-me")
 ALGORITHM = "HS256"
 GOOGLE_CLIENT_ID = os.getenv("PUBLIC_GOOGLE_CLIENT_ID")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
@@ -42,17 +42,25 @@ def create_access_token(data: dict, expires_delta: timedelta = timedelta(days=7)
     return jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
 
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 security_optional = HTTPBearer(auto_error=False)
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> int:
+def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> int:
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Missing token")
     try:
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[ALGORITHM])
         user_id = payload.get("user_id")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
+        if not database.get_user_by_id(user_id):
+            raise HTTPException(status_code=401, detail="Invalid token")
         return user_id
+    except HTTPException:
+        raise
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
@@ -64,7 +72,10 @@ def get_optional_user(
         return None
     try:
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[ALGORITHM])
-        return payload.get("user_id")
+        user_id = payload.get("user_id")
+        if user_id is None or not database.get_user_by_id(user_id):
+            return None
+        return user_id
     except jwt.PyJWTError:
         return None
 
@@ -74,39 +85,38 @@ def startup_event():
     database.init_db()
 
 
-# ── Auth Models ──────────────────────────────────────────────────────────────
-
 class RegisterRequest(BaseModel):
     email: str
     password: str
+
 
 class LoginRequest(BaseModel):
     email: str
     password: str
 
+
 class GoogleAuthRequest(BaseModel):
     credential: str
+
 
 class ChangePasswordRequest(BaseModel):
     old_password: str
     new_password: str
 
 
-# ── Auth Endpoints ────────────────────────────────────────────────────────────
-
 @app.post("/api/auth/register")
 def register(req: RegisterRequest):
-    hashed_pwd = get_password_hash(req.password)
-    user_id = database.create_user_with_password(req.email, hashed_pwd)
+    email = req.email.strip().lower()
+    user_id = database.create_user_with_password(email, get_password_hash(req.password))
     if not user_id:
         raise HTTPException(status_code=400, detail="Email already registered")
-    token = create_access_token(data={"sub": req.email, "user_id": user_id})
+    token = create_access_token(data={"sub": email, "user_id": user_id})
     return {"token": token}
 
 
 @app.post("/api/auth/login")
 def login(req: LoginRequest):
-    user = database.get_user_by_email(req.email)
+    user = database.get_user_by_email(req.email.strip().lower())
     if not user or not user["password_hash"]:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not verify_password(req.password, user["password_hash"]):
@@ -125,9 +135,14 @@ def google_auth(req: GoogleAuthRequest):
         google_id = idinfo.get("sub")
         if not email:
             raise HTTPException(status_code=400, detail="Google token missing email")
-        user_id = database.upsert_google_user(email, google_id)
-        token = create_access_token(data={"sub": email, "user_id": user_id})
+        if not google_id:
+            raise HTTPException(status_code=400, detail="Google token missing subject")
+        normalized_email = email.strip().lower()
+        user_id = database.upsert_google_user(normalized_email, google_id)
+        token = create_access_token(data={"sub": normalized_email, "user_id": user_id})
         return {"token": token}
+    except HTTPException:
+        raise
     except ValueError:
         raise HTTPException(status_code=401, detail="Invalid Google token")
 
@@ -142,8 +157,6 @@ def change_password(req: ChangePasswordRequest, user_id: int = Depends(get_curre
     database.update_user_password(user_id, get_password_hash(req.new_password))
     return {"status": "success"}
 
-
-# ── Settings & Avatar ─────────────────────────────────────────────────────────
 
 class UserSettings(BaseModel):
     display_name: str = ""
@@ -180,7 +193,11 @@ def update_settings(settings: UserSettings, user_id: int = Depends(get_current_u
 
 @app.post("/api/avatar")
 async def upload_avatar(file: UploadFile = File(...), user_id: int = Depends(get_current_user)):
-    content = await file.read()
+    try:
+        content = await file.read()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Could not read uploaded file")
+
     mime = file.content_type
     database.save_user_avatar(user_id, content, mime)
 
@@ -193,32 +210,27 @@ async def upload_avatar(file: UploadFile = File(...), user_id: int = Depends(get
 
 @app.get("/api/avatar/{uid}")
 def get_avatar(uid: int):
-    conn = database.get_connection()
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("SELECT avatar_blob, avatar_mime FROM user_settings WHERE user_id = ?", (uid,))
-    row = c.fetchone()
-    conn.close()
-
-    if row and row["avatar_blob"]:
-        return Response(content=row["avatar_blob"], media_type=row["avatar_mime"])
+    avatar = database.get_user_avatar(uid)
+    if avatar:
+        return Response(content=avatar["avatar_blob"], media_type=avatar["avatar_mime"])
     raise HTTPException(status_code=404, detail="Avatar not found")
 
-
-# ── Analytics & Account ───────────────────────────────────────────────────────
 
 @app.get("/api/analytics")
 def get_analytics(period: str = "30d", user_id: int = Depends(get_current_user)):
     try:
         metrics = analytics.calculate_metrics(user_id, period)
         return metrics
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
 
 
 @app.delete("/api/account")
 def delete_account(user_id: int = Depends(get_current_user)):
-    database.delete_user(user_id)
+    if not database.delete_user(user_id):
+        raise HTTPException(status_code=404, detail="Account not found")
     return {"status": "success"}
 
 
@@ -241,45 +253,47 @@ def sync_mock_data(user_id: int = Depends(get_current_user)):
 
 @app.get("/api/exchange-rate")
 def get_exchange_rate(currency: str):
-    """Returns the live exchange rate for the given currency relative to USD."""
     rate = currency_exchange_converter("usd", currency)
     return {
         "currency": currency.upper(),
         "rate": rate,
-        "fetched_at": datetime.utcnow().isoformat() + "Z"
+        "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
-
-# ── Log / Diff / Blame ────────────────────────────────────────────────────────
 
 @app.get("/api/log")
 def get_log(user_id: int = Depends(get_current_user)):
     snapshots = [database.snapshot_usd_payload(s) for s in database.get_snapshots(user_id)]
-    for s in snapshots:
-        if s.get("clients_json"):
-            s["clients"] = json.loads(s["clients_json"])
-            del s["clients_json"]
+    for snapshot in snapshots:
+        if snapshot.get("clients_json"):
+            try:
+                snapshot["clients"] = json.loads(snapshot["clients_json"])
+            except (json.JSONDecodeError, TypeError):
+                snapshot["clients"] = []
+            del snapshot["clients_json"]
     return {"snapshots": snapshots}
 
 
 @app.get("/api/diff")
 def get_diff_api(base: int = Query(None), compare: int = Query(None), user_id: int = Depends(get_current_user)):
-    return get_diff(user_id, base, compare)
+    diff = get_diff(user_id, base, compare)
+    if "error" in diff:
+        raise HTTPException(status_code=400, detail=diff["error"])
+    return diff
 
 
 @app.post("/api/diff/insight")
 def get_diff_insight_api(diff_data: dict, user_id: int = Depends(get_current_user)):
-    from coach import generate_diff_insight
-    insight = generate_diff_insight(diff_data, user_id)
-    return {"insight": insight}
+    try:
+        return {"insight": coach.generate_diff_insight(diff_data, user_id)}
+    except Exception as error:
+        raise HTTPException(status_code=503, detail=str(error))
 
 
 @app.get("/api/blame")
 def get_blame_api(user_id: int = Depends(get_current_user)):
     return get_blame(user_id)
 
-
-# ── Sources & Merge ───────────────────────────────────────────────────────────
 
 @app.get("/api/sources")
 def get_sources_api(user_id: int = Depends(get_current_user)):
@@ -347,28 +361,15 @@ def commit_merge_api(user_id: int = Depends(get_current_user)):
     return {"status": "success"}
 
 
-# ── Pulse ─────────────────────────────────────────────────────────────────────
-
 class PulseRequest(BaseModel):
-    job_title: str          # must match a key in MARKET_DATA (e.g. "react-developer")
-    years_experience: str   # must be one of VALID_EXP_BRACKETS (e.g. "1-3")
-    country: str            # must match a key in COUNTRY_DATA (e.g. "egypt")
-    current_rate: Optional[float] = None  # user's current hourly rate in USD, optional
+    job_title: str
+    years_experience: str
+    country: str
+    current_rate: Optional[float] = None
 
 
 @app.post("/api/pulse")
 def get_pulse(req: PulseRequest, user_id: Optional[int] = Depends(get_optional_user)):
-    """
-    Main Pulse endpoint. Accepts the three core inputs plus an optional current rate.
-    Returns the full structured report: data sections computed here, AI sections
-    generated by pulse.py.
-
-    Works for both authenticated and anonymous users. When authenticated, reads
-    coach_language and coach_tone from the user's settings so the AI brief matches
-    their Coach page preferences.
-    """
-
-    # --- 1. Validate inputs against the curated dataset ---
     role_key = req.job_title.lower().strip()
     if role_key not in MARKET_DATA:
         raise HTTPException(
@@ -393,7 +394,6 @@ def get_pulse(req: PulseRequest, user_id: Optional[int] = Depends(get_optional_u
                    f"Supported values: {list(COUNTRY_DATA.keys())}"
         )
 
-    # --- 2. Pull structured data from the curated dataset ---
     role_data = MARKET_DATA[role_key]
     bracket_data = role_data[exp_key]
     country_data = COUNTRY_DATA[country_key]
@@ -407,13 +407,11 @@ def get_pulse(req: PulseRequest, user_id: Optional[int] = Depends(get_optional_u
     saturation    = bracket_data["saturation"]
     timing_signal = bracket_data["timing_signal"]
 
-    # --- 3. Fetch reference exchange rate (static) ---
     try:
-        live_rate = currency_exchange_converter('usd', country_data["currency"].lower())
+        live_rate = currency_exchange_converter("usd", country_data["currency"].lower())
     except Exception:
-        live_rate = None  # report will show USD only, no local conversion
+        live_rate = None
 
-    # --- 4. Compute rate ranges in local currency ---
     def to_local(usd_amount: float) -> float | None:
         if live_rate is None:
             return None
@@ -425,7 +423,6 @@ def get_pulse(req: PulseRequest, user_id: Optional[int] = Depends(get_optional_u
         "target": {"usd": market_rates["target"], "local": to_local(market_rates["target"])},
     }
 
-    # --- 5. Compute Position Indicator ---
     position_indicator = None
     position_gap_pct = None
     if req.current_rate is not None:
@@ -439,7 +436,6 @@ def get_pulse(req: PulseRequest, user_id: Optional[int] = Depends(get_optional_u
         else:
             position_indicator = "Market-Aligned"
 
-    # --- 6. Compute Purchasing Power (monthly income scenarios) ---
     workloads = {
         "conservative": {"hours_per_month": 40,  "label": "Conservative (10 hrs/week)"},
         "typical":      {"hours_per_month": 80,  "label": "Typical (20 hrs/week)"},
@@ -464,7 +460,6 @@ def get_pulse(req: PulseRequest, user_id: Optional[int] = Depends(get_optional_u
         "amount_local": to_local(country_data["col_reference_usd"]),
     }
 
-    # --- 7. Read user settings for AI tone/language (if logged in) ---
     coach_language = "mixed"
     coach_tone = "Balanced"
     if user_id:
@@ -473,7 +468,6 @@ def get_pulse(req: PulseRequest, user_id: Optional[int] = Depends(get_optional_u
             coach_language = user_settings.get("coach_language", "mixed")
             coach_tone = user_settings.get("coach_tone", "Balanced")
 
-    # --- 8. Call AI for all narrative/interpretive sections ---
     ai_sections = pulse.generate_pulse_ai_sections(
         role_label=role_data["label"],
         exp_bracket=exp_key,
@@ -487,7 +481,6 @@ def get_pulse(req: PulseRequest, user_id: Optional[int] = Depends(get_optional_u
         coach_tone=coach_tone,
     )
 
-    # --- 9. Assemble and return the full response ---
     return {
         "inputs": {
             "job_title":        role_key,
@@ -539,10 +532,6 @@ def get_pulse(req: PulseRequest, user_id: Optional[int] = Depends(get_optional_u
 
 @app.get("/api/pulse/meta")
 def get_pulse_meta():
-    """
-    Returns the valid input options for the Pulse form.
-    No auth required — this is static reference data.
-    """
     return {
         "roles": [
             {"key": key, "label": data["label"]}
@@ -555,8 +544,6 @@ def get_pulse_meta():
         "experience_brackets": VALID_EXP_BRACKETS,
     }
 
-
-# ── Coach ─────────────────────────────────────────────────────────────────────
 
 class CoachRequest(BaseModel):
     message: str
@@ -582,14 +569,17 @@ def chat_with_coach(req: CoachRequest, user_id: int = Depends(get_current_user))
         latest = snapshots[0]
         context_str = f"Latest income: {latest['total_received_usd']} USD."
 
-    reply = coach.generate_coach_response(
-        context_str,
-        req.message,
-        req.session_id,
-        coach_language=coach_language,
-        coach_tone=coach_tone,
-        user_id=user_id,
-    )
+    try:
+        reply = coach.generate_coach_response(
+            context_str,
+            req.message,
+            req.session_id,
+            coach_language=coach_language,
+            coach_tone=coach_tone,
+            user_id=user_id,
+        )
+    except Exception as error:
+        raise HTTPException(status_code=503, detail=str(error))
     return {"reply": reply}
 
 
@@ -605,13 +595,15 @@ def create_coach_session(req: SessionCreateRequest, user_id: int = Depends(get_c
 
 @app.put("/api/coach/sessions/{session_id}")
 def rename_coach_session(session_id: int, req: SessionRenameRequest, user_id: int = Depends(get_current_user)):
-    database.rename_session(session_id, req.title, user_id)
+    if not database.rename_session(session_id, req.title, user_id):
+        raise HTTPException(status_code=404, detail="Session not found")
     return {"status": "success"}
 
 
 @app.delete("/api/coach/sessions/{session_id}")
 def delete_coach_session(session_id: int, user_id: int = Depends(get_current_user)):
-    database.delete_session(session_id, user_id)
+    if not database.delete_session(session_id, user_id):
+        raise HTTPException(status_code=404, detail="Session not found")
     return {"status": "success"}
 
 

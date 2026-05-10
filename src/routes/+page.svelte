@@ -1,11 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import Navbar from '$lib/components/Navbar.svelte';
-	import NeoButton from '$lib/components/ui/NeoButton.svelte';
 	import NeoCard from '$lib/components/ui/NeoCard.svelte';
-
-	const homeHref = resolve('/');
-	const appHref = resolve('/log');
 
 	const systemCards = [
 		{
@@ -94,8 +90,8 @@
 				shifts, and inflation.
 			</p>
 			<div class="hero-actions">
-				<NeoButton href={appHref}>Open Dashboard</NeoButton>
-				<NeoButton variant="secondary" href="#system">Explore Features</NeoButton>
+				<a href={resolve('/log')} class="landing-action primary">Open Dashboard</a>
+				<a href={resolve('/#system')} class="landing-action secondary">Explore Features</a>
 			</div>
 		</div>
 	</section>
@@ -188,9 +184,12 @@
 				Join the waitlist or explore the open-source repository today.
 			</p>
 			<div class="hero-actions center">
-				<NeoButton href={appHref}>Start Syncing</NeoButton>
-				<NeoButton variant="secondary" target="_blank" href="https://github.com/EzzeldinSalah/Cornea"
-					>Explore System</NeoButton
+				<a href={resolve('/log')} class="landing-action primary">Start Syncing</a>
+				<a
+					class="landing-action secondary"
+					target="_blank"
+					rel="noreferrer"
+					href="https://github.com/EzzeldinSalah/Cornea">Explore System</a
 				>
 			</div>
 		</div>
@@ -307,6 +306,41 @@
 		justify-content: center;
 	}
 
+	.landing-action {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border: 3px solid var(--line);
+		font-family: monospace;
+		font-weight: 800;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+		padding: 0.8rem 1.25rem;
+		text-decoration: none;
+		transition: all 0.15s ease-out;
+		cursor: pointer;
+		box-shadow: 4px 4px 0 var(--shadow);
+		font-size: 0.95rem;
+		border-radius: 12px;
+		background: var(--accent);
+		color: var(--accent-ink);
+	}
+
+	.landing-action.secondary {
+		background: transparent;
+		color: var(--text);
+	}
+
+	.landing-action:active {
+		transform: translate(4px, 4px);
+		box-shadow: 0 0 0 var(--shadow);
+	}
+
+	.landing-action:hover {
+		transform: translate(-3px, -3px);
+		box-shadow: 7px 7px 0 var(--shadow);
+	}
+
 	.section {
 		margin-top: 4.5rem;
 		padding-block: 2rem;
@@ -404,6 +438,5 @@
 	}
 
 	@media (max-width: 640px) {
-		/* Adjusted for potentially other local rules */
 	}
 </style>

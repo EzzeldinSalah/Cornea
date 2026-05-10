@@ -1,9 +1,18 @@
-# Package Managers
+node_modules
+.svelte-kit
+build
+.output
+.vercel
+.netlify
+.wrangler
+venv
+api/venv
+api/.venv
+__pycache__
+*.pyc
 package-lock.json
 pnpm-lock.yaml
 yarn.lock
 bun.lock
 bun.lockb
-
-# Miscellaneous
 /static/

@@ -53,22 +53,29 @@ def currency_exchange_converter(base_currency: str, target_currency: str):
             res = client.get(primary_url)
             res.raise_for_status()
             data = res.json()
-    except Exception as exc:
-        logging.warning(f"Primary exchange API failed: {exc}. Trying fallback.")
+    except Exception as error:
+        logging.warning(f"Primary exchange API failed: {error}. Trying fallback.")
         try:
             with httpx.Client(timeout=5.0) as client:
                 res = client.get(fallback_url)
                 res.raise_for_status()
                 data = res.json()
-        except Exception as exc2:
+        except Exception:
             if cached:
                 logging.warning("Fallback exchange API failed; using cached value.")
                 return cached["rate"]
             raise HTTPException(status_code=503, detail="Exchange rate unavailable.")
 
-    rate = float(data[base][target])
+    try:
+        rate = float(data[base][target])
+    except (KeyError, TypeError, ValueError):
+        if cached:
+            return cached["rate"]
+        raise HTTPException(status_code=503, detail="Exchange rate unavailable.")
+
     EXCHANGE_RATE_CACHE[cache_key] = {"rate": rate, "timestamp": now}
     return rate
+
 
 def get_diff(user_id: int, base_id: int = None, compare_id: int = None):
     snapshots = database.get_snapshots(user_id)
@@ -78,10 +85,15 @@ def get_diff(user_id: int, base_id: int = None, compare_id: int = None):
     base_snap = None
     compare_snap = None
 
-    if base_id is not None and compare_id is not None:
+    if (base_id is None) != (compare_id is None):
+        return {"error": "Select both base and compare snapshots."}
+
+    if base_id is not None:
         base_snap = next((s for s in snapshots if s["id"] == base_id), None)
         compare_snap = next((s for s in snapshots if s["id"] == compare_id), None)
-    
+        if not base_snap or not compare_snap:
+            return {"error": "Selected snapshots were not found."}
+
     if not base_snap or not compare_snap:
         base_snap = snapshots[1]
         compare_snap = snapshots[0]
@@ -91,16 +103,16 @@ def get_diff(user_id: int, base_id: int = None, compare_id: int = None):
         if snap.get("clients_json"):
             try:
                 raw_clients = json.loads(snap["clients_json"])
-                for c in raw_clients:
-                    clients.append({
-                        "name": c.get("name", "Unknown"),
-                        "billed": float(c.get("billed", 0)),
-                        "effective_rate": float(c.get("effective_rate", 0)),
-                        "wait_days": float(c.get("payment_wait_days", 0))
-                    })
-            except:
-                pass
-        
+            except (json.JSONDecodeError, TypeError):
+                raw_clients = []
+            for c in raw_clients:
+                clients.append({
+                    "name": c.get("name", "Unknown"),
+                    "billed": float(c.get("billed", 0)),
+                    "effective_rate": float(c.get("effective_rate", 0)),
+                    "wait_days": float(c.get("payment_wait_days", 0)),
+                })
+
         avg_wait = sum(c["wait_days"] for c in clients) / len(clients) if clients else 0.0
         total_billed = sum(c["billed"] for c in clients)
         eff_rate = sum(c["effective_rate"] * c["billed"] for c in clients) / total_billed if total_billed > 0 else 0.0
@@ -114,7 +126,7 @@ def get_diff(user_id: int, base_id: int = None, compare_id: int = None):
             "received_usd": float(snap["total_received_usd"]),
             "effective_rate": round(eff_rate, 2),
             "avg_payment_wait": round(avg_wait, 1),
-            "clients": clients
+            "clients": clients,
         }
 
     base = process_snapshot(base_snap)
@@ -132,52 +144,54 @@ def get_diff(user_id: int, base_id: int = None, compare_id: int = None):
     return {
         "base": base,
         "compare": compare,
-        "delta": delta
+        "delta": delta,
     }
+
 
 def get_blame(user_id: int):
     snapshots = database.get_snapshots(user_id)
     client_stats = {}
     for s in snapshots:
         if s.get("clients_json"):
-            clients = json.loads(s["clients_json"])
+            try:
+                clients = json.loads(s["clients_json"])
+            except (json.JSONDecodeError, TypeError):
+                clients = []
             for c in clients:
                 name = c["name"]
                 if name not in client_stats:
-                    client_stats[name] = {"billed": 0, "effective_rate_sum": 0, "payment_wait_sum": 0, "count": 0}
+                    client_stats[name] = {
+                        "billed": 0,
+                        "effective_rate_sum": 0,
+                        "payment_wait_sum": 0,
+                        "count": 0,
+                    }
                 client_stats[name]["billed"] += c["billed"]
                 client_stats[name]["effective_rate_sum"] += c["effective_rate"]
                 client_stats[name]["payment_wait_sum"] += c["payment_wait_days"]
                 client_stats[name]["count"] += 1
-                
+
     results = []
     for name, stats in client_stats.items():
         results.append({
             "name": name,
             "total_billed_usd": stats["billed"],
             "avg_effective_rate": stats["effective_rate_sum"] / stats["count"],
-            "avg_payment_wait": stats["payment_wait_sum"] / stats["count"]
+            "avg_payment_wait": stats["payment_wait_sum"] / stats["count"],
         })
 
     return results
 
 
-@tool
+@tool(description="Compare the two most recent income snapshots and return the change in USD income.")
 def get_income_diff() -> dict:
-    """Compare the two most recent income snapshots and return the change in
-    USD income. Call this when the user asks about how their income shifted
-    recently. Takes no arguments."""
     if ACTIVE_USER_ID is None:
         return {"error": "User context missing"}
     return get_diff(ACTIVE_USER_ID)
 
 
-@tool
+@tool(description="Return per-client aggregate stats across all snapshots.")
 def get_client_blame() -> list:
-    """Return per-client aggregate stats across all snapshots: total billed,
-    average effective hourly rate, and average payment wait in days. Call
-    this when the user asks which clients are slow, which underpay, or wants
-    a client-by-client breakdown. Takes no arguments."""
     if ACTIVE_USER_ID is None:
         return []
     return get_blame(ACTIVE_USER_ID)

@@ -1,17 +1,17 @@
-import NProgress from "nprogress";
-import "nprogress/nprogress.css";
+import NProgress from 'nprogress';
+import 'nprogress/nprogress.css';
 
-import { beforeNavigate, afterNavigate } from "$app/navigation";
+import { beforeNavigate, afterNavigate } from '$app/navigation';
 
 NProgress.configure({
-  showSpinner: false,
-  trickleSpeed: 100
+	showSpinner: false,
+	trickleSpeed: 100
 });
 
 beforeNavigate(() => {
-  NProgress.start();
+	NProgress.start();
 });
 
 afterNavigate(() => {
-  NProgress.done();
+	NProgress.done();
 });

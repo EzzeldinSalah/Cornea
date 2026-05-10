@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import NeoButton from '$lib/components/ui/NeoButton.svelte';
 	import { loadExchangeRate } from '$lib/stores/exchange';
 
@@ -27,6 +28,7 @@
 	let newPassword = $state('');
 	let showDeleteConfirm = $state(false);
 	let showClearConfirm = $state(false);
+	let loadError = $state('');
 
 	function getToken() {
 		return localStorage.getItem('cornea_token');
@@ -35,7 +37,7 @@
 	onMount(async () => {
 		const token = getToken();
 		if (!token) {
-			goto('/auth');
+			void goto(resolve('/auth'));
 			return;
 		}
 		try {
@@ -48,10 +50,10 @@
 				if (settings.avatar_url) avatarPreview = settings.avatar_url;
 			} else if (res.status === 401) {
 				localStorage.removeItem('cornea_token');
-				goto('/auth');
+				void goto(resolve('/auth'));
 			}
-		} catch (e) {
-			console.error('Failed to load settings', e);
+		} catch {
+			loadError = 'Failed to load settings.';
 		} finally {
 			isLoading = false;
 		}
@@ -61,7 +63,6 @@
 		isSaving = true;
 		const token = getToken();
 		try {
-			// Upload avatar first if selected
 			if (avatarFile) {
 				const formData = new FormData();
 				formData.append('file', avatarFile);
@@ -84,7 +85,7 @@
 				await loadExchangeRate(settings.primary_currency, token);
 				alert('Settings saved successfully!');
 			} else alert('Failed to save settings.');
-		} catch (e) {
+		} catch {
 			alert('Error saving settings.');
 		} finally {
 			isSaving = false;
@@ -117,7 +118,7 @@
 				oldPassword = '';
 				newPassword = '';
 			} else alert(data.detail || 'Failed to change password.');
-		} catch (e) {
+		} catch {
 			alert('Error changing password.');
 		}
 	}
@@ -131,9 +132,9 @@
 			});
 			if (res.ok) {
 				localStorage.removeItem('cornea_token');
-				goto('/auth');
+				void goto(resolve('/auth'));
 			} else alert('Failed to delete account.');
-		} catch (e) {
+		} catch {
 			alert('Error deleting account.');
 		}
 	}
@@ -149,7 +150,7 @@
 				alert('All financial snapshots cleared.');
 				showClearConfirm = false;
 			} else alert('Failed to clear snapshots.');
-		} catch (e) {
+		} catch {
 			alert('Error clearing snapshots.');
 		}
 	}
@@ -170,7 +171,7 @@
 				a.click();
 				URL.revokeObjectURL(url);
 			} else alert('Failed to export data.');
-		} catch (e) {
+		} catch {
 			alert('Error exporting data.');
 		}
 	}
@@ -188,6 +189,8 @@
 
 	{#if isLoading}
 		<p class="loading">Loading settings...</p>
+	{:else if loadError}
+		<p class="loading">{loadError}</p>
 	{:else}
 		<div class="settings-grid">
 			<section class="settings-card">
@@ -445,11 +448,6 @@
 		gap: 1.25rem;
 	}
 
-	.danger-card {
-		border-color: #b91c1c;
-		box-shadow: 6px 6px 0 #7f1d1d;
-	}
-
 	h2 {
 		font-size: 1.25rem;
 		margin: 0;
@@ -458,10 +456,6 @@
 		gap: 0.5rem;
 		padding-bottom: 1rem;
 		border-bottom: 3px solid var(--theme-line);
-	}
-
-	.danger-card h2 {
-		border-bottom-color: #b91c1c;
 	}
 
 	.badge {

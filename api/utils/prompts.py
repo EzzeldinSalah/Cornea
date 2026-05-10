@@ -1,7 +1,4 @@
 def build_system_prompt(coach_language: str = "mixed", coach_tone: str = "Balanced") -> str:
-    """Build the system prompt dynamically based on user's coach settings."""
-
-    # --- Tone section ---
     tone_map = {
         "Blunt uncle": """Your personality:
 - You talk like a blunt Egyptian/Arab friend who happens to understand money
@@ -44,7 +41,6 @@ Hard rules:
 - One response = one insight + one action. Not a list of five things.""",
     }
 
-    # --- Language section ---
     language_map = {
         "mixed": """Language rules:
 - Look ONLY at the user's latest message to decide the language.

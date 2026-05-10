@@ -178,7 +178,7 @@
 				value={currentSessionId}
 				onchange={handleSessionChange}
 			>
-				{#each sessions as session}
+				{#each sessions as session (session.id)}
 					<option value={session.id}>{session.title}</option>
 				{/each}
 			</select>
@@ -191,7 +191,7 @@
 
 <div class="chat-interface rounded-md">
 	<div class="chat-history" bind:this={chatContainer}>
-		{#each messages as msg}
+		{#each messages as msg, messageIndex (messageIndex)}
 			<div class="message-wrapper {msg.role}">
 				<div class="message-bubble" dir="auto">
 					{msg.text}

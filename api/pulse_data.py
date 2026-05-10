@@ -1,17 +1,3 @@
-# pulse_data.py
-# Fully hardcoded data source for Pulse.
-# No AI required. No external market API required.
-# This file contains:
-# 1. Market rate data
-# 2. Country / currency / cost-of-living data
-# 3. Static FX rates
-# 4. Working windows
-# 5. Fully hardcoded narrative content for UI rendering
-
-# =========================================================
-# MARKET DATA
-# =========================================================
-
 MARKET_DATA = {
     "react-developer": {
         "label": "React Developer",
@@ -95,10 +81,6 @@ MARKET_DATA = {
     },
 }
 
-# =========================================================
-# COUNTRIES
-# =========================================================
-
 COUNTRY_DATA = {
     "egypt": {
         "label": "Egypt",
@@ -150,25 +132,6 @@ COUNTRY_DATA = {
     },
 }
 
-# =========================================================
-# STATIC FX RATES
-# =========================================================
-
-STATIC_FX = {
-    "EGP": 48.5, # Updated slightly closer to recent market figures
-    "SAR": 3.75,
-    "AED": 3.67,
-    "QAR": 3.64,
-    "KWD": 0.31,
-    "JOD": 0.71,
-    "MAD": 10.05,
-    "TND": 3.12,
-}
-
-# =========================================================
-# WORKING WINDOWS
-# =========================================================
-
 WORKING_WINDOWS = [
     {
         "market": "US East Coast",
@@ -191,10 +154,6 @@ WORKING_WINDOWS = [
 ]
 
 VALID_EXP_BRACKETS = ["0-1", "1-3", "3-5", "5-10", "10+"]
-
-# =========================================================
-# FULLY HARDCODED UI TEXT CONTENT
-# =========================================================
 
 TEXT_LIBRARY = {
     "High": {

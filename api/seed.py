@@ -94,11 +94,14 @@ def seed_snapshots(conn):
     c.execute("DELETE FROM snapshots WHERE user_id = 1")
     try:
         c.execute("DELETE FROM monthly_summaries WHERE user_id = 1")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as error:
+        if "no such table" not in str(error):
+            raise
         try:
             c.execute("DELETE FROM monthly_summaries")
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as fallback_error:
+            if "no such table" not in str(fallback_error):
+                raise
 
     now = datetime.now()
     start_date = now - timedelta(days=30 * 14)
@@ -188,8 +191,9 @@ def seed_sessions(conn):
     for sid in session_ids:
         try:
             c.execute("DELETE FROM message_store WHERE session_id = ?", (str(sid),))
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as error:
+            if "no such table" not in str(error):
+                raise
 
     c.execute("SELECT MAX(id) FROM coach_sessions")
     max_id = c.fetchone()[0]
@@ -208,7 +212,6 @@ def seed_sessions(conn):
     conn.commit()
     conn.close()
 
-    # Now use SQLAlchemy (via LangChain) with no raw conn holding a lock
     for session_id, messages in session_ids_to_seed:
         history = SQLChatMessageHistory(str(session_id), "sqlite:///cornea.db")
         for role, text in messages:
@@ -239,7 +242,6 @@ def main():
     seed_settings(conn)
     seed_snapshots(conn)
     conn.close()
-    # seed_sessions manages its own conn lifecycle (closes before SQLAlchemy writes)
     conn2 = database.get_connection()
     seed_sessions(conn2)
 

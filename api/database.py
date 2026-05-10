@@ -2,6 +2,7 @@ import sqlite3
 import json
 from datetime import datetime, timedelta
 import random
+import uuid
 
 DB_FILE = "cornea.db"
 
@@ -43,6 +44,16 @@ def get_connection():
     conn = sqlite3.connect(DB_FILE, timeout=15.0)
     conn.execute("PRAGMA journal_mode=WAL;")
     return conn
+
+
+def column_exists(cursor, table_name: str, column_name: str) -> bool:
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    return any(row[1] == column_name for row in cursor.fetchall())
+
+
+def add_column_if_missing(cursor, table_name: str, column_name: str, definition: str):
+    if not column_exists(cursor, table_name, column_name):
+        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
 def migrate_snapshots_to_usd_only(cursor):
@@ -174,31 +185,12 @@ def init_db():
     )
     """)
 
-    try:
-        c.execute("ALTER TABLE user_settings ADD COLUMN avatar_blob BLOB")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        c.execute("ALTER TABLE user_settings ADD COLUMN avatar_mime TEXT")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        c.execute("ALTER TABLE snapshots ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        c.execute("ALTER TABLE snapshots ADD COLUMN source TEXT DEFAULT 'upwork'")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        c.execute("ALTER TABLE snapshots ADD COLUMN platform_transaction_id TEXT")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        c.execute("ALTER TABLE coach_sessions ADD COLUMN user_id INTEGER")
-    except sqlite3.OperationalError:
-        pass
+    add_column_if_missing(c, "user_settings", "avatar_blob", "BLOB")
+    add_column_if_missing(c, "user_settings", "avatar_mime", "TEXT")
+    add_column_if_missing(c, "snapshots", "user_id", "INTEGER NOT NULL DEFAULT 1")
+    add_column_if_missing(c, "snapshots", "source", "TEXT DEFAULT 'upwork'")
+    add_column_if_missing(c, "snapshots", "platform_transaction_id", "TEXT")
+    add_column_if_missing(c, "coach_sessions", "user_id", "INTEGER")
 
     migrate_snapshots_to_usd_only(c)
 
@@ -316,20 +308,29 @@ def rename_session(session_id: int, new_title: str, user_id: int):
         "UPDATE coach_sessions SET title = ? WHERE id = ? AND user_id = ?",
         (new_title, session_id, user_id),
     )
+    updated = c.rowcount > 0
     conn.commit()
     conn.close()
+    return updated
 
 
 def delete_session(session_id: int, user_id: int):
     conn = get_connection()
     c = conn.cursor()
     c.execute("DELETE FROM coach_sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
+    deleted = c.rowcount > 0
+    if not deleted:
+        conn.close()
+        return False
     try:
         c.execute("DELETE FROM message_store WHERE session_id = ?", (str(session_id),))
-    except sqlite3.OperationalError:
-        pass  # message_store is created by LangChain on first use
+    except sqlite3.OperationalError as error:
+        if "no such table" not in str(error):
+            conn.close()
+            raise
     conn.commit()
     conn.close()
+    return True
 
 
 def get_user_by_email(email: str):
@@ -397,6 +398,10 @@ def update_user_password(user_id: int, new_password_hash: str):
 def delete_user(user_id: int):
     conn = get_connection()
     c = conn.cursor()
+    c.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+    if not c.fetchone():
+        conn.close()
+        return False
     c.execute("DELETE FROM user_settings WHERE user_id = ?", (user_id,))
     c.execute("DELETE FROM snapshots WHERE user_id = ?", (user_id,))
     c.execute("SELECT id FROM coach_sessions WHERE user_id = ?", (user_id,))
@@ -405,11 +410,16 @@ def delete_user(user_id: int):
     for sid in session_ids:
         try:
             c.execute("DELETE FROM message_store WHERE session_id = ?", (str(sid),))
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as error:
+            if "no such table" not in str(error):
+                conn.close()
+                raise
+    c.execute("DELETE FROM income_sources WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM transactions WHERE user_id = ?", (user_id,))
     c.execute("DELETE FROM users WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
+    return True
 
 
 def get_user_settings(user_id: int):
@@ -476,6 +486,18 @@ def save_user_avatar(user_id: int, blob: bytes, mime: str):
     conn.close()
 
 
+def get_user_avatar(user_id: int):
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT avatar_blob, avatar_mime FROM user_settings WHERE user_id = ?", (user_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row or not row["avatar_blob"]:
+        return None
+    return dict(row)
+
+
 def export_user_data(user_id: int):
     conn = get_connection()
     conn.row_factory = sqlite3.Row
@@ -521,64 +543,58 @@ def get_coach_session_by_id(session_id: int, user_id: int):
     conn.close()
     return dict(row) if row else None
 
-
-# --- MERGE & TRANSACTIONS ---
-
 def get_income_sources(user_id: int):
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("SELECT * FROM income_sources WHERE user_id = ?", (user_id,))
     rows = c.fetchall()
-    
-    # If no sources exist, create default ones
+
     if not rows:
         default_sources = [
-            ("upwork_1", "Upwork", "Upwork Global", "connected", datetime.now().isoformat()),
-            ("freelancer_1", "Freelancer", "Freelancer.com", "not connected", None),
-            ("mostaql_1", "Mostaql", "Mostaql Account", "connected", datetime.now().isoformat())
+            (f"upwork_{user_id}", "Upwork", "Upwork Global", "connected", datetime.now().isoformat()),
+            (f"freelancer_{user_id}", "Freelancer", "Freelancer.com", "not connected", None),
+            (f"mostaql_{user_id}", "Mostaql", "Mostaql Account", "connected", datetime.now().isoformat()),
         ]
-        for src_id, plat, name, status, last_sync in default_sources:
+        for source_id, platform, name, status, last_sync in default_sources:
             c.execute(
                 "INSERT INTO income_sources (id, platform, name, status, last_sync, user_id) VALUES (?, ?, ?, ?, ?, ?)",
-                (src_id, plat, name, status, last_sync, user_id)
+                (source_id, platform, name, status, last_sync, user_id),
             )
         conn.commit()
         c.execute("SELECT * FROM income_sources WHERE user_id = ?", (user_id,))
         rows = c.fetchall()
-        
+
     conn.close()
     return [dict(row) for row in rows]
 
 def add_manual_transaction(user_id: int, data: dict):
-    import uuid
     conn = get_connection()
     c = conn.cursor()
-    
-    tx_id = str(uuid.uuid4())
+
+    transaction_id = str(uuid.uuid4())
     date = data.get("date", datetime.now().isoformat())
     source = data.get("source_label", "Manual")
-    desc = data.get("description", "Manual Entry")
-    amt = float(data.get("amount", 0))
-    
-    # Simple fee deduction for manual (0%) or platforms
+    description = data.get("description", "Manual Entry")
+    amount = float(data.get("amount", 0))
+
     fee_pct = 0.0
     if "Khamsat" in source or "Mostaql" in source:
         fee_pct = 0.20
-        
-    fee = amt * fee_pct
-    net = amt - fee
-    local_amt = 0 # UI calculates local equivalent if 0
-    
+
+    fee = amount * fee_pct
+    net = amount - fee
+    local_amount = 0
+
     c.execute("""
-    INSERT INTO transactions 
+    INSERT INTO transactions
     (id, date, source, client_description, amount_usd, amount_local, platform_fee, net_received, user_id, committed)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-    """, (tx_id, date, source, desc, amt, local_amt, fee, net, user_id))
-    
+    """, (transaction_id, date, source, description, amount, local_amount, fee, net, user_id))
+
     conn.commit()
     conn.close()
-    return tx_id
+    return transaction_id
 
 def get_uncommitted_transactions(user_id: int):
     conn = get_connection()
@@ -593,72 +609,69 @@ def commit_transactions_to_snapshot(user_id: int):
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
-    
+
     c.execute("SELECT * FROM transactions WHERE user_id = ? AND committed = 0", (user_id,))
     uncommitted = c.fetchall()
-    
+
     if not uncommitted:
         conn.close()
         return False
-        
+
     total_invoiced = sum(row["amount_usd"] for row in uncommitted)
     total_fees = sum(row["platform_fee"] for row in uncommitted)
     total_received = sum(row["net_received"] for row in uncommitted)
-    
+
     clients = []
     for row in uncommitted:
         clients.append({
             "name": row["client_description"],
             "billed": row["amount_usd"],
-            "effective_rate": 0, # Placeholder
-            "payment_wait_days": 0, # Placeholder
+            "effective_rate": 0,
+            "payment_wait_days": 0,
         })
-        
+
     date_str = datetime.now().isoformat()
-    
+
     c.execute("""
     INSERT INTO snapshots (
-        created_at, upwork_sync_date, total_invoiced_usd, total_fees_usd, 
+        created_at, upwork_sync_date, total_invoiced_usd, total_fees_usd,
         total_received_usd, clients_json, user_id, source, platform_transaction_id
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (date_str, date_str, total_invoiced, total_fees, total_received, json.dumps(clients), user_id, "merged", f"merge-{date_str}"))
-    
+
     c.execute("UPDATE transactions SET committed = 1 WHERE user_id = ? AND committed = 0", (user_id,))
-    
+
     conn.commit()
     conn.close()
     return True
 
 def sync_source_mock(source_id: str, user_id: int):
-    import uuid
-    import random
     conn = get_connection()
     c = conn.cursor()
-    
+
     c.execute("SELECT platform, name FROM income_sources WHERE id = ? AND user_id = ?", (source_id, user_id))
-    src = c.fetchone()
-    if not src:
+    source_row = c.fetchone()
+    if not source_row:
         conn.close()
         return False
-        
-    platform, name = src
+
+    platform, _ = source_row
     date_str = datetime.now().isoformat()
-    
-    # Generate 1-3 random transactions
+
     for _ in range(random.randint(1, 3)):
-        tx_id = str(uuid.uuid4())
-        amt = random.randint(100, 1000)
-        fee = amt * 0.10
-        net = amt - fee
-        desc = f"Client Project {random.randint(100, 999)}"
+        transaction_id = str(uuid.uuid4())
+        amount = random.randint(100, 1000)
+        fee = amount * 0.10
+        net = amount - fee
+        description = f"Client Project {random.randint(100, 999)}"
         c.execute("""
-        INSERT INTO transactions 
+        INSERT INTO transactions
         (id, date, source, client_description, amount_usd, amount_local, platform_fee, net_received, user_id, committed)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-        """, (tx_id, date_str, platform, desc, amt, 0, fee, net, user_id))
-        
+        """, (transaction_id, date_str, platform, description, amount, 0, fee, net, user_id))
+
     c.execute("UPDATE income_sources SET last_sync = ? WHERE id = ? AND user_id = ?", (date_str, source_id, user_id))
-    
+
     conn.commit()
     conn.close()
     return True

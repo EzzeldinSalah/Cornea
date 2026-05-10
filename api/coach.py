@@ -49,8 +49,14 @@ def _run_with_tools(prompt_value):
     return response
 
 
-def generate_coach_response(context_data, user_message, session_id,
-                            coach_language="mixed", coach_tone="Balanced", user_id=None):
+def generate_coach_response(
+    context_data,
+    user_message,
+    session_id,
+    coach_language="mixed",
+    coach_tone="Balanced",
+    user_id=None,
+):
     system_prompt = build_system_prompt(coach_language, coach_tone)
 
     prompt = ChatPromptTemplate.from_messages([
@@ -68,20 +74,19 @@ def generate_coach_response(context_data, user_message, session_id,
         history_messages_key="history",
     )
 
+    set_active_user_id(user_id)
     try:
-        set_active_user_id(user_id)
         response = chain_with_memory.invoke(
             {"input": user_message, "context": context_data},
             config={"configurable": {"session_id": session_id}},
         )
-        content = response.content
-        if isinstance(content, list) and content and isinstance(content[0], dict):
-            return content[0].get("text", str(content))
-        return str(content)
-    except Exception as e:
-        return f"Failed with error: {e}"
     finally:
         set_active_user_id(None)
+
+    content = response.content
+    if isinstance(content, list) and content and isinstance(content[0], dict):
+        return content[0].get("text", str(content))
+    return str(content)
 
 
 def get_formatted_history(session_id: str):
@@ -115,18 +120,15 @@ Output ONLY that paragraph, no intro, no bullet points.
         ("system", system_prompt),
         ("human", "Here is the financial diff: {input}"),
     ])
-    
-    # Simple chain without history or tools for this specific ad-hoc task
     chain = prompt | llm
-    
+
+    set_active_user_id(user_id)
     try:
-        set_active_user_id(user_id)
         response = chain.invoke({"input": json.dumps(diff_data, indent=2)})
-        content = response.content
-        if isinstance(content, list) and content and isinstance(content[0], dict):
-            return content[0].get("text", str(content))
-        return str(content)
-    except Exception as e:
-        return f"Coach unavailable — read the numbers yourself. (Error: {e})"
     finally:
         set_active_user_id(None)
+
+    content = response.content
+    if isinstance(content, list) and content and isinstance(content[0], dict):
+        return content[0].get("text", str(content))
+    return str(content)

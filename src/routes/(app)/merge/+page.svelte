@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import NeoButton from '$lib/components/ui/NeoButton.svelte';
-	import NeoCard from '$lib/components/ui/NeoCard.svelte';
 	import { primaryCurrency, toLocal } from '$lib/stores/exchange';
 
 	type IncomeSource = {
@@ -32,33 +32,14 @@
 		sources: { name: string; contribution_usd: number }[];
 	};
 
-	let sources = $state<IncomeSource[]>([
-		{ id: '1', platform: 'Upwork', name: 'Upwork Global', status: 'connected', last_sync: new Date().toISOString() },
-		{ id: '2', platform: 'Freelancer', name: 'Freelancer.com', status: 'not connected' },
-		{ id: '3', platform: 'Mostaql', name: 'Mostaql Account', status: 'connected', last_sync: new Date().toISOString() }
-	]);
-	let transactions = $state<Transaction[]>([
-		{ id: 'tx1', date: new Date().toISOString(), source: 'Upwork', client_description: 'Web Development', amount_usd: 850, amount_local: 0, platform_fee: 85, net_received: 765 },
-		{ id: 'tx2', date: new Date(Date.now() - 86400000).toISOString(), source: 'Mostaql', client_description: 'UI Design', amount_usd: 300, amount_local: 0, platform_fee: 60, net_received: 240 },
-		{ id: 'tx3', date: new Date(Date.now() - 172800000).toISOString(), source: 'Manual', client_description: 'Direct Client', amount_usd: 1200, amount_local: 0, platform_fee: 0, net_received: 1200 }
-	]);
-	let reconciliation = $state<Reconciliation | null>({
-		total_usd: 2350,
-		total_local: 0,
-		total_fees: 145,
-		kept_percentage: 93.8,
-		sources: [
-			{ name: 'Upwork', contribution_usd: 850 },
-			{ name: 'Mostaql', contribution_usd: 300 },
-			{ name: 'Manual', contribution_usd: 1200 }
-		]
-	});
-	
-	let loadingSources = $state(false);
-	let loadingTimeline = $state(false);
-	let loadingRecon = $state(false);
+	let sources = $state<IncomeSource[]>([]);
+	let transactions = $state<Transaction[]>([]);
+	let reconciliation = $state<Reconciliation | null>(null);
+
+	let loadingSources = $state(true);
+	let loadingTimeline = $state(true);
 	let committing = $state(false);
-	
+
 	let commitMessage = $state('');
 	let commitError = $state('');
 
@@ -81,7 +62,7 @@
 	onMount(() => {
 		const token = getToken();
 		if (!token) {
-			void goto('/auth');
+			void goto(resolve('/auth'));
 			return;
 		}
 		void fetchSources(token);
@@ -92,12 +73,16 @@
 	async function fetchSources(token: string) {
 		try {
 			const res = await fetch('/api/sources', { headers: { Authorization: `Bearer ${token}` } });
-			if (res.ok) {
-				const data = await res.json();
-				if (data && data.length > 0) sources = data;
+			if (res.status === 401) {
+				localStorage.removeItem('cornea_token');
+				void goto(resolve('/auth'));
+				return;
 			}
-		} catch (e) {
-			console.error('Failed to fetch sources', e);
+			if (!res.ok) throw new Error('Failed to fetch sources.');
+			const data = await res.json();
+			sources = Array.isArray(data) ? data : [];
+		} catch {
+			commitError = 'Failed to fetch sources.';
 		} finally {
 			loadingSources = false;
 		}
@@ -105,18 +90,23 @@
 
 	async function fetchTimeline(token: string) {
 		try {
-			const res = await fetch('/api/merge/timeline', { headers: { Authorization: `Bearer ${token}` } });
-			if (res.ok) {
-				const data = await res.json();
-				if (data && data.length > 0) {
-					// Ensure sorting by date desc
-					transactions = (data.transactions || data).sort((a: Transaction, b: Transaction) => 
-						new Date(b.date).getTime() - new Date(a.date).getTime()
-					);
-				}
+			const res = await fetch('/api/merge/timeline', {
+				headers: { Authorization: `Bearer ${token}` }
+			});
+			if (res.status === 401) {
+				localStorage.removeItem('cornea_token');
+				void goto(resolve('/auth'));
+				return;
 			}
-		} catch (e) {
-			console.error('Failed to fetch timeline', e);
+			if (!res.ok) throw new Error('Failed to fetch timeline.');
+			const data = await res.json();
+			const timeline = Array.isArray(data) ? data : data.transactions || [];
+			transactions = timeline.sort(
+				(a: Transaction, b: Transaction) => new Date(b.date).getTime() - new Date(a.date).getTime()
+			);
+			currentPage = 1;
+		} catch {
+			commitError = 'Failed to fetch timeline.';
 		} finally {
 			loadingTimeline = false;
 		}
@@ -124,31 +114,38 @@
 
 	async function fetchReconciliation(token: string) {
 		try {
-			const res = await fetch('/api/merge/reconciliation', { headers: { Authorization: `Bearer ${token}` } });
-			if (res.ok) {
-				const data = await res.json();
-				if (data && data.total_usd !== undefined) {
-					reconciliation = data;
-				}
+			const res = await fetch('/api/merge/reconciliation', {
+				headers: { Authorization: `Bearer ${token}` }
+			});
+			if (res.status === 401) {
+				localStorage.removeItem('cornea_token');
+				void goto(resolve('/auth'));
+				return;
 			}
-		} catch (e) {
-			console.error('Failed to fetch reconciliation', e);
-		} finally {
-			loadingRecon = false;
+			if (!res.ok) throw new Error('Failed to fetch reconciliation.');
+			reconciliation = await res.json();
+		} catch {
+			commitError = 'Failed to fetch reconciliation.';
 		}
 	}
 
 	async function syncSource(id: string) {
 		const token = getToken();
+		if (!token) {
+			void goto(resolve('/auth'));
+			return;
+		}
 		try {
-			await fetch(`/api/sources/${id}/sync`, {
+			const res = await fetch(`/api/sources/${id}/sync`, {
 				method: 'POST',
 				headers: { Authorization: `Bearer ${token}` }
 			});
-			void fetchSources(token!);
-			void fetchTimeline(token!);
-		} catch (e) {
-			alert('Sync failed');
+			if (!res.ok) throw new Error('Sync failed.');
+			void fetchSources(token);
+			void fetchTimeline(token);
+			void fetchReconciliation(token);
+		} catch {
+			commitError = 'Sync failed.';
 		}
 	}
 
@@ -157,8 +154,12 @@
 			alert('Please fill out description and amount.');
 			return;
 		}
-		isSubmittingManual = true;
 		const token = getToken();
+		if (!token) {
+			void goto(resolve('/auth'));
+			return;
+		}
+		isSubmittingManual = true;
 		try {
 			const res = await fetch('/api/transactions/manual', {
 				method: 'POST',
@@ -171,13 +172,14 @@
 			if (res.ok) {
 				manualEntry.description = '';
 				manualEntry.amount = 0;
-				void fetchTimeline(token!);
-				void fetchReconciliation(token!);
+				void fetchTimeline(token);
+				void fetchReconciliation(token);
 			} else {
-				alert('Failed to add manual entry');
+				const data = await res.json().catch(() => ({}));
+				commitError = data.detail || 'Failed to add manual entry.';
 			}
-		} catch (e) {
-			console.error(e);
+		} catch {
+			commitError = 'Failed to add manual entry.';
 		} finally {
 			isSubmittingManual = false;
 		}
@@ -185,6 +187,10 @@
 
 	async function commitMerge() {
 		const token = getToken();
+		if (!token) {
+			void goto(resolve('/auth'));
+			return;
+		}
 		committing = true;
 		commitMessage = '';
 		commitError = '';
@@ -195,13 +201,13 @@
 			});
 			if (res.ok) {
 				commitMessage = '✅ Snapshot committed — now visible in Log, Diff, Blame, and Analytics';
-				void fetchTimeline(token!);
-				void fetchReconciliation(token!);
+				void fetchTimeline(token);
+				void fetchReconciliation(token);
 			} else {
 				const data = await res.json().catch(() => ({}));
 				commitError = data.detail || 'Failed to commit snapshot.';
 			}
-		} catch (e) {
+		} catch {
 			commitError = 'Failed to commit snapshot.';
 		} finally {
 			committing = false;
@@ -218,11 +224,11 @@
 
 	function getSourceColor(source: string) {
 		const s = source.toLowerCase();
-		if (s.includes('upwork')) return '#0052cc'; // blue
-		if (s.includes('freelancer')) return '#f5a623'; // yellow
-		if (s.includes('mostaql')) return '#28a745'; // green
-		if (s.includes('khamsat')) return '#fd7e14'; // orange
-		return '#6c757d'; // gray for manual/other
+		if (s.includes('upwork')) return '#0052cc';
+		if (s.includes('freelancer')) return '#f5a623';
+		if (s.includes('mostaql')) return '#28a745';
+		if (s.includes('khamsat')) return '#fd7e14';
+		return '#6c757d';
 	}
 
 	let paginatedTransactions = $derived(
@@ -241,8 +247,8 @@
 		<p class="subtitle">Consolidate all your income sources into a single timeline.</p>
 	</div>
 	<div class="header-action">
-		<NeoButton 
-			onclick={commitMerge} 
+		<NeoButton
+			onclick={commitMerge}
 			disabled={committing || transactions.length === 0}
 			class="commit-btn"
 		>
@@ -265,21 +271,26 @@
 		</div>
 		<div class="stat-inline">
 			<span class="label">Total ({$primaryCurrency})</span>
-			<span class="val local">{reconciliation ? formatLocal(reconciliation.total_usd) : '0.00'}</span>
+			<span class="val local"
+				>{reconciliation ? formatLocal(reconciliation.total_usd) : '0.00'}</span
+			>
 		</div>
 		<div class="stat-inline">
 			<span class="label">Platform Fees</span>
-			<span class="val danger">{reconciliation ? formatUsd(reconciliation.total_fees) : '$0.00'}</span>
+			<span class="val danger"
+				>{reconciliation ? formatUsd(reconciliation.total_fees) : '$0.00'}</span
+			>
 		</div>
 		<div class="stat-inline">
 			<span class="label">Kept (%)</span>
-			<span class="val success">{reconciliation ? reconciliation.kept_percentage.toFixed(1) : '0.0'}%</span>
+			<span class="val success"
+				>{reconciliation ? reconciliation.kept_percentage.toFixed(1) : '0.0'}%</span
+			>
 		</div>
 	</div>
 </div>
 
 <div class="main-split">
-	<!-- Left Sidebar: Sources & Manual Entry -->
 	<div class="sidebar-col">
 		<section class="sources-section">
 			<h2>Sources</h2>
@@ -287,7 +298,7 @@
 				<p class="loading">Loading sources...</p>
 			{:else}
 				<div class="compact-source-list">
-					{#each sources as source}
+					{#each sources as source (source.id)}
 						<div class="compact-source-row">
 							<div class="source-info">
 								<span class="source-name" style="color: {getSourceColor(source.platform)};">
@@ -310,7 +321,12 @@
 				<div class="compact-manual-form">
 					<input type="text" bind:value={manualEntry.description} placeholder="Description" />
 					<div class="flex gap-2">
-						<input type="number" bind:value={manualEntry.amount} placeholder="Amount" class="flex-1" />
+						<input
+							type="number"
+							bind:value={manualEntry.amount}
+							placeholder="Amount"
+							class="flex-1"
+						/>
 						<select bind:value={manualEntry.currency} class="w-auto">
 							<option value="USD">USD</option>
 						</select>
@@ -331,10 +347,9 @@
 		</section>
 	</div>
 
-	<!-- Right Main: Timeline -->
 	<div class="timeline-col">
 		<section class="timeline-section">
-			<div class="flex justify-between items-end mb-4">
+			<div class="mb-4 flex items-end justify-between">
 				<h2>Merged Timeline</h2>
 				<div class="pagination">
 					<button disabled={currentPage === 1} onclick={() => currentPage--}>&lt;</button>
@@ -358,11 +373,11 @@
 					</thead>
 					<tbody>
 						{#if loadingTimeline}
-							<tr><td colspan="7" class="text-center p-4">Loading timeline...</td></tr>
+							<tr><td colspan="7" class="p-4 text-center">Loading timeline...</td></tr>
 						{:else if paginatedTransactions.length === 0}
-							<tr><td colspan="7" class="text-center p-4">No unmerged transactions found.</td></tr>
+							<tr><td colspan="7" class="p-4 text-center">No unmerged transactions found.</td></tr>
 						{:else}
-							{#each paginatedTransactions as t}
+							{#each paginatedTransactions as t (t.id)}
 								<tr>
 									<td class="whitespace-nowrap">{new Date(t.date).toLocaleDateString()}</td>
 									<td>
@@ -372,7 +387,11 @@
 									</td>
 									<td><strong>{t.client_description}</strong></td>
 									<td>{formatUsd(t.amount_usd)}</td>
-									<td class="local-val">{t.amount_local > 0 ? t.amount_local.toFixed(2) : toLocal(t.amount_usd).toFixed(2)}</td>
+									<td class="local-val"
+										>{t.amount_local > 0
+											? t.amount_local.toFixed(2)
+											: toLocal(t.amount_usd).toFixed(2)}</td
+									>
 									<td class="danger">-{formatUsd(t.platform_fee)}</td>
 									<td class="success">{formatUsd(t.net_received)}</td>
 								</tr>
@@ -497,9 +516,18 @@
 		text-transform: uppercase;
 		border: 2px solid var(--theme-line);
 	}
-	.badge.connected { background: #d4edda; color: #155724; }
-	.badge.manual { background: #e2e3e5; color: #383d41; }
-	.badge.not.connected { background: #f8d7da; color: #721c24; }
+	.badge.connected {
+		background: #d4edda;
+		color: #155724;
+	}
+	.badge.manual {
+		background: #e2e3e5;
+		color: #383d41;
+	}
+	.badge.not-connected {
+		background: #f8d7da;
+		color: #721c24;
+	}
 
 	:global(.btn-sm) {
 		padding: 0.3rem 0.6rem !important;
@@ -511,8 +539,9 @@
 		flex-direction: column;
 		gap: 0.5rem;
 	}
-	
-	input, select {
+
+	input,
+	select {
 		width: 100%;
 		padding: 0.5rem;
 		border: 2px solid var(--theme-line);
@@ -523,7 +552,8 @@
 		font-size: 0.9rem;
 		outline: none;
 	}
-	input:focus, select:focus {
+	input:focus,
+	select:focus {
 		box-shadow: 2px 2px 0 var(--theme-accent);
 		transform: translate(-1px, -1px);
 	}
@@ -599,7 +629,7 @@
 		text-transform: uppercase;
 		font-size: 0.8rem;
 	}
-	
+
 	.source-badge {
 		padding: 0.2rem 0.5rem;
 		border-radius: 4px;
@@ -609,7 +639,7 @@
 		text-transform: uppercase;
 		border: 2px solid var(--theme-line);
 	}
-	
+
 	.local-val {
 		font-weight: bold;
 		color: var(--theme-accent);
@@ -620,19 +650,49 @@
 	.text-center {
 		text-align: center;
 	}
-	.w-full { width: 100%; }
-	.w-auto { width: auto; }
-	.flex-1 { flex: 1; }
-	.mt-2 { margin-top: 0.5rem; }
-	.mt-8 { margin-top: 2rem; }
-	.mb-4 { margin-bottom: 1rem; }
-	.mb-6 { margin-bottom: 1.5rem; }
-	.p-4 { padding: 1rem; }
-	.flex { display: flex; }
-	.gap-2 { gap: 0.5rem; }
-	.justify-between { justify-content: space-between; }
-	.items-end { align-items: flex-end; }
-	.val.local { color: var(--theme-accent); }
-	.danger { color: #dc3545; }
-	.success { color: #28a745; }
+	.w-full {
+		width: 100%;
+	}
+	.w-auto {
+		width: auto;
+	}
+	.flex-1 {
+		flex: 1;
+	}
+	.mt-2 {
+		margin-top: 0.5rem;
+	}
+	.mt-8 {
+		margin-top: 2rem;
+	}
+	.mb-4 {
+		margin-bottom: 1rem;
+	}
+	.mb-6 {
+		margin-bottom: 1.5rem;
+	}
+	.p-4 {
+		padding: 1rem;
+	}
+	.flex {
+		display: flex;
+	}
+	.gap-2 {
+		gap: 0.5rem;
+	}
+	.justify-between {
+		justify-content: space-between;
+	}
+	.items-end {
+		align-items: flex-end;
+	}
+	.val.local {
+		color: var(--theme-accent);
+	}
+	.danger {
+		color: #dc3545;
+	}
+	.success {
+		color: #28a745;
+	}
 </style>

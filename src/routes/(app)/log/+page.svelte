@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import NeoButton from '$lib/components/ui/NeoButton.svelte';
 	import { primaryCurrency, toLocal } from '$lib/stores/exchange';
 
@@ -23,7 +24,7 @@
 		try {
 			const token = getToken();
 			if (!token) {
-				void goto('/auth');
+				void goto(resolve('/auth'));
 				return;
 			}
 
@@ -32,15 +33,14 @@
 			});
 			if (res.status === 401) {
 				localStorage.removeItem('cornea_token');
-				void goto('/auth');
+				void goto(resolve('/auth'));
 				return;
 			}
 			if (!res.ok) throw new Error('Failed to fetch commits.');
 			const data = await res.json();
 			snapshots = data.snapshots || [];
-		} catch (e) {
-			console.error(e);
-			error = e instanceof Error ? e.message : 'Failed to fetch commits.';
+		} catch (caughtError) {
+			error = caughtError instanceof Error ? caughtError.message : 'Failed to fetch commits.';
 		} finally {
 			loading = false;
 		}
@@ -49,7 +49,7 @@
 	async function runMockSync() {
 		const token = getToken();
 		if (!token) {
-			void goto('/auth');
+			void goto(resolve('/auth'));
 			return;
 		}
 
@@ -60,7 +60,7 @@
 			});
 			if (res.status === 401) {
 				localStorage.removeItem('cornea_token');
-				void goto('/auth');
+				void goto(resolve('/auth'));
 				return;
 			}
 			if (!res.ok) throw new Error('Mock sync failed.');
@@ -103,7 +103,7 @@
 	</div>
 {:else}
 	<div class="timeline">
-		{#each snapshots as s}
+		{#each snapshots as s (s.id)}
 			<div class="commit-card">
 				<div class="commit-header">
 					<span class="hash">commit {s.id.toString().padStart(7, '0')}</span>

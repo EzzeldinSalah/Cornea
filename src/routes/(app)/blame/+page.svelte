@@ -11,6 +11,7 @@
 
 	let clients = $state<ClientBlame[]>([]);
 	let loading = $state(true);
+	let error = $state('');
 
 	function getToken() {
 		return localStorage.getItem('cornea_token');
@@ -31,8 +32,8 @@
 			} else {
 				clients = allClients;
 			}
-		} catch (e) {
-			console.error(e);
+		} catch {
+			error = 'Failed to load blame data.';
 		} finally {
 			loading = false;
 		}
@@ -50,13 +51,17 @@
 
 {#if loading}
 	<p class="loading">Running analysis...</p>
+{:else if error}
+	<div class="empty-state">
+		<p>{error}</p>
+	</div>
 {:else if clients.length === 0}
 	<div class="empty-state">
 		<p>No client data found.</p>
 	</div>
 {:else}
 	<div class="grid">
-		{#each clients as c, i}
+		{#each clients as c, i (c.name)}
 			<NeoCard
 				variant={i === 0 ? 'worst' : i === clients.length - 1 ? 'best' : 'default'}
 				class="!p-6"

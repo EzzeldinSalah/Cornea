@@ -98,7 +98,10 @@ def calculate_metrics(user_id: int, period: str) -> Dict[str, Any]:
 
         clients_json = s.get("clients_json")
         if clients_json:
-            clients_list = json.loads(clients_json)
+            try:
+                clients_list = json.loads(clients_json)
+            except (json.JSONDecodeError, TypeError):
+                clients_list = []
             for c in clients_list:
                 name = c.get("name", "Unknown")
                 billed = float(c.get("billed", 0) or 0)
@@ -165,10 +168,8 @@ def calculate_metrics(user_id: int, period: str) -> Dict[str, Any]:
         current_index *= 1 + (inflation_rate_pct / 100.0)
 
     growth_rate = float(os.getenv("FORECAST_GROWTH_RATE", "1.05"))
-    # TODO: replace with real model post-hackathon
     forecast = []
     if monthly_data:
-        # Forecast based on last month's USD
         last_usd = monthly_data[-1]["received_usd"]
         for i in range(1, 4):
             future_month = (datetime.now() + timedelta(days=30 * i)).strftime("%b '%y")

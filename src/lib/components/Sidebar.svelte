@@ -43,7 +43,6 @@
 		<a href={resolve('/settings')} class:active={page.url.pathname.includes('/settings')}>
 			<img class="icon" src={settingIcon} alt="Settings" /> <span class="text">Settings</span>
 		</a>
-
 	</nav>
 
 	<div class="footer">
@@ -92,7 +91,7 @@
 		flex: 1;
 	}
 
-	.nav-links a{
+	.nav-links a {
 		display: flex;
 		align-items: center;
 		gap: 1rem;
@@ -114,14 +113,6 @@
 		filter: invert(1) brightness(2);
 		transition: filter 0.2s;
 	}
-	.icon.emoji {
-		font-size: 1.3rem;
-		filter: grayscale(1) !important;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
-
 	.text {
 		letter-spacing: 0.05em;
 	}
@@ -142,28 +133,6 @@
 
 	.nav-links a.active .icon {
 		filter: invert(0);
-	}
-
-	.nav-links .disabled-link {
-		opacity: 0.4;
-		cursor: not-allowed;
-	}
-
-	.divider {
-		height: 2px;
-		background: #ff5900;
-		margin: 1rem 0 0.5rem 0;
-		border-radius: 2px;
-	}
-
-	.section-label {
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: #8a6a50;
-		margin-bottom: 0.5rem;
-		font-weight: bold;
-		padding-left: 1rem;
 	}
 
 	.footer {
